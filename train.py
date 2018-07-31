@@ -12,6 +12,7 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
 
     def match_layer_by_words(args):
         """ Utterance-Response Matching Layer """
+        from keras.layers import concatenate, dot
         u = args[0]  # utterances Tensor
         r = args[1]  # response Tensor
         # concatenate all max_turn (10) M_1 word-word similarity matrices (50x50)
@@ -27,6 +28,7 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
 
     def match_layer_by_segments(args):
         """ Utterance-Response Matching Layer """
+        from keras.layers import concatenate, dot
         u = args[0]  # utterances Tensor
         r = args[1]  # response Tensor
         # concatenate all max_turn (10) M_2 sequence-sequence similarity matrices (50x50)
@@ -99,9 +101,12 @@ def main():
     print('build model')
     model = build_SMN(args.max_turn, args.maxlen, args.word_dim, args.sent_dim, args.last_dim, args.num_words, embedding_matrix)
 
+    json_string = model.to_json()
+    open(args.model_name + '.json', 'w').write(json_string)
+
     print(model.summary())
 
-    early_stopping = EarlyStopping(monitor='val_loss', patience=2)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10)
     model_checkpoint = ModelCheckpoint(args.model_name + '.h5', save_best_only=True, save_weights_only=True)
 
     print('load train data')
@@ -119,7 +124,5 @@ def main():
         epochs=200,
         callbacks=[early_stopping, model_checkpoint]
     )
-    json_string = model.to_json()
-    open(args.model_name + '.json', 'w').write(json_string)
 
 if __name__ == '__main__': main()
