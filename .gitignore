@@ -5,3 +5,4 @@ ubuntu_data/
 *.h5
 *.json
 .python-version
+.idea

@@ -6,6 +6,7 @@ from tqdm import tqdm
 from gensim.models.word2vec import Word2Vec
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
+# import gensim
 
 def build_multiturn_data(multiturn_data):
     contexts = []
@@ -48,6 +49,8 @@ def preprocess_multi_turn_texts(context, max_turn, maxlen):
 
 def word2vec_embedding(path, num_words, embedding_dim, word_index):
     w2v = Word2Vec.load(path)
+    # w2v = Word2Vec.load_word2vec_format(path)
+    # w2v = gensim.models.KeyedVectors.load_word2vec_format(path)
     num_words = min(num_words, len(word_index))
     embedding_matrix = np.zeros((num_words + 1, embedding_dim))
     for word, i in word_index.items():
