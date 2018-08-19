@@ -9,7 +9,7 @@ def main():
     args = psr.parse_args()
     sentences = Text8Corpus(args.path)
     print('training')
-    model = Word2Vec(sentences, size=args.dim, window=5, min_count=5, workers=4)
+    model = Word2Vec(sentences, size=args.dim, window=5, min_count=0, workers=8)
     model.save('ubuntu_word2vec_' + str(args.dim) + '.model')
     print('saved.')
 

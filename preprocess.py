@@ -70,11 +70,13 @@ def main():
     psr.add_argument('--embedding_dim', default=200, type=int)
     psr.add_argument('--w2v_path', default='ubuntu_word2vec_200.model')
     psr.add_argument('--train_data', default='ubuntu_data/train.txt')
+    psr.add_argument('--valid_data', default='ubuntu_data/valid.txt')
     psr.add_argument('--test_data', default='ubuntu_data/test.txt')
     args = psr.parse_args()
 
     print('load data')
     train_context, train_response, train_labels = build_multiturn_data(args.train_data)
+    valid_context, valid_response, valid_labels = build_multiturn_data(args.valid_data)
     test_context, test_response, test_labels = build_multiturn_data(args.test_data)
 
     print('tokenize')
@@ -90,14 +92,18 @@ def main():
     print('preprocess data')
     train_context = preprocess_multi_turn_texts(train_context, args.max_turn, args.maxlen)
     train_response = preprocess_texts(train_response, args.maxlen)
+    valid_context = preprocess_multi_turn_texts(valid_context, args.max_turn, args.maxlen)
+    valid_response = preprocess_texts(valid_response, args.maxlen)
     test_context = preprocess_multi_turn_texts(test_context, args.max_turn, args.maxlen)
     test_response = preprocess_texts(test_response, args.maxlen)
 
     train_data = {'context': train_context, 'response': train_response, 'labels': train_labels}
+    valid_data = {'context': valid_context, 'response': valid_response, 'labels': valid_labels}
     test_data = {'context': test_context, 'response': test_response, 'labels': test_labels}
 
     print('dump')
     joblib.dump(train_data, 'train.joblib', protocol=-1, compress=3)
+    joblib.dump(valid_data, 'valid.joblib', protocol=-1, compress=3)
     joblib.dump(test_data, 'test.joblib', protocol=-1, compress=3)
     joblib.dump(embedding_matrix, 'embedding_matrix.joblib', protocol=-1, compress=3)
 

@@ -6,3 +6,5 @@ ubuntu_data/
 *.json
 .python-version
 .idea
+info/
+__pycache__
