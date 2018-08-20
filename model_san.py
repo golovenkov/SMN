@@ -37,34 +37,36 @@ def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
     def AttentionBlock(word_dim=200, sent_dim=200, maxlen=50):
         def inside(args):
             e_u = args[0]  # word-level an utterance representation (?,  50, 200)
-            e_r = args[1]  # word-level representation of a word in a response   (?, 200)
+            e_r = args[1]  # word-level a response  representation  (?, 50, 200)
             h_u = args[2]  # segment-level an utterance representation (?,  50, 200)
-            h_r = args[3]  # segment-level representation of a segment in a response (?, 200)
+            h_r = args[3]  # segment-level a response  representation  (?, 50, 200)
             t1 = Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(e_u)
-            t1 = Dot(axes=(-1, -1))([t1, e_r])
+            t1 = Dot(axes=(-1, -1))([e_r, t1])
             t1 = Lambda(lambda x: K.tanh(x))(t1)
-            t1 = Dense(maxlen)(t1)    # (?, 50)
-            t1 = Softmax(axis=1)(t1)
-            t1 = Lambda(lambda x: tf.multiply(tf.expand_dims(x[0], axis=-1), x[1]))([t1, e_u])  # "weight" the utterance vector according to the response
-            t1 = Lambda(lambda x: tf.reduce_sum(x, axis=1))(t1)
+            t1 = Dense(maxlen)(t1)    # (?, 50, 50)
+            t1 = Softmax(axis=2)(t1)
+            broadcasted_e_u = Lambda(lambda x: K.stack(x, axis=1))([e_u for word in range(maxlen)])
+            t1 = Lambda(lambda x: tf.multiply(tf.expand_dims(x[0], axis=-1), x[1]))([t1, broadcasted_e_u])  # "weight" the utterance vector according to the response
+            t1 = Lambda(lambda x: tf.reduce_sum(x, axis=2))(t1)
             t1 = Lambda(lambda x: tf.multiply(x[0], x[1]))([t1, e_r])  # Hadamard product to the response vector
 
             t2 = Dense(sent_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(h_u)
-            t2 = Dot(axes=(-1, -1))([t2, h_r])
+            t2 = Dot(axes=(-1, -1))([h_r, t2])
             t2 = Lambda(lambda x: K.tanh(x))(t2)
-            t2 = Dense(maxlen)(t2)  # (?, 50)
+            t2 = Dense(maxlen)(t2)  # (?, 50, 50)
             t2 = Softmax(axis=1)(t2)
-            t2 = Lambda(lambda x: tf.multiply(tf.expand_dims(x[0], axis=-1), x[1]))([t2, h_u])  # "weight" the utterance vector according to the response
-            t2 = Lambda(lambda x: tf.reduce_sum(x, axis=1))(t2)
+            broadcasted_h_u = Lambda(lambda x: K.stack(x, axis=1))([h_u for word in range(maxlen)])
+            t2 = Lambda(lambda x: tf.multiply(tf.expand_dims(x[0], axis=-1), x[1]))([t2, broadcasted_h_u])  # "weight" the utterance vector according to the response
+            t2 = Lambda(lambda x: tf.reduce_sum(x, axis=2))(t2)
             t2 = Lambda(lambda x: tf.multiply(x[0], x[1]))([t2, h_r])  # Hadamard product to the response vector
 
             # t = K.concatenate([t1, t2], axis=-1)  # concatenated vector t
             t = Lambda(lambda x: K.stack(x, axis=-1))([t1, t2])
-            t = Reshape((2 * sent_dim,))(t)
-            return t
+            t = Reshape((maxlen, 2 * sent_dim,))(t)
+            return t   # (?, 50, 400)
         return inside
 
-    def WordsAndRepresentationsAttention(maxlen=50, max_turn=10):
+    def WordsAndRepresentationsAttention(max_turn=10):
         def inside(args):
             word_u = args[0]  # word-level utterances Tensor (?, 10, 50, 200)
             word_r = args[1]  # word-level response Tensor   (?, 50, 200)
@@ -73,17 +75,13 @@ def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
 
             T = Lambda(lambda x: K.stack(x, axis=1))(      # for each (utterance-response) pair
                 [
-                    Lambda(lambda x: K.stack(x, axis=1))(  # for each word/segment in response Vector
-                        [
                             AttentionBlock()([
                                 Lambda(lambda x: x[:, turn])(word_u),
-                                Lambda(lambda x: x[:, word])(word_r),
+                                word_r,
                                 Lambda(lambda x: x[:, turn])(segm_u),
-                                Lambda(lambda x: x[:, word])(segm_r)
-                            ]
-                            ) for word in range(maxlen)
-                        ]
-                    ) for turn in range(max_turn)
+                                segm_r
+                            ])
+                     for turn in range(max_turn)
                 ]
             )
             return T
