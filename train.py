@@ -14,13 +14,8 @@ from model import build_SMN
 def main():
     # TensorFlow wizardry
     config = tf.ConfigProto()
-
     # Don't pre-allocate memory; allocate as-needed
     config.gpu_options.allow_growth = True
-
-    # # Only allow a total of half the GPU memory to be allocated
-    # config.gpu_options.per_process_gpu_memory_fraction = 0.3
-
     # Create a session with the above options specified.
     K.tensorflow_backend.set_session(tf.Session(config=config))
 
@@ -68,14 +63,27 @@ def main():
     valid_response = np.array(valid_data['response'])
     valid_labels = valid_data['labels']
 
+    # steps_per_epoch = 1000000/bs/4 to validate each 1/4th true epoch
+    # def myGenerator(context, response, labels, data_len=1000000, bs=200):
+    #     while True:
+    #         print('\nreshuffle train data')
+    #         idx = np.array([i for i in range(data_len)])
+    #         np.random.shuffle(idx)
+    #         for i in range(data_len//bs):  # 1875 * 32 = 60000 -> # of training samples
+    #             yield [context[idx[i * bs:(i + 1) * bs]], response[idx[i * bs:(i + 1) * bs]]], labels[idx[i * bs:(i + 1) * bs]]
+
     print('fitting')
     model.fit(
         [context, response],
         labels,
+        # myGenerator(context, response, labels),
         validation_data=([valid_context, valid_response], valid_labels),
         batch_size=args.batch_size,
         epochs=10,
         callbacks=[early_stopping, model_checkpoint]
+        ,
+        # steps_per_epoch = (len(context) // 200 // 4),
+        # validation_steps= (len(valid_context) // 200)
     )
 
 if __name__ == '__main__': main()

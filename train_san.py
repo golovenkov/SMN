@@ -14,13 +14,8 @@ from model_san import build_SAN
 def main():
     # TensorFlow wizardry
     config = tf.ConfigProto()
-
     # Don't pre-allocate memory; allocate as-needed
     config.gpu_options.allow_growth = True
-
-    # # Only allow a total of half the GPU memory to be allocated
-    # config.gpu_options.per_process_gpu_memory_fraction = 0.3
-
     # Create a session with the above options specified.
     K.tensorflow_backend.set_session(tf.Session(config=config))
 
@@ -51,7 +46,7 @@ def main():
     # from keras.utils import plot_model
     # plot_model(model, to_file='san.png')
 
-    print(model.summary())    # The model is really huge
+    # print(model.summary())    # The model is really huge
 
     early_stopping = EarlyStopping(monitor='val_loss', patience=2)
     model_checkpoint = ModelCheckpoint(args.model_name + '.h5', save_best_only=True, save_weights_only=True)
