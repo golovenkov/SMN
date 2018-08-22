@@ -58,7 +58,7 @@ def main():
     response = np.array(test_data['response'])
 
     print('predict')
-    y = model.predict([context, response], batch_size=200, verbose=1)
+    y = model.predict([context, response], batch_size=400, verbose=1)
     y = np.array(y).reshape(50000, 10)
     y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
     for n in [1, 2, 5]:

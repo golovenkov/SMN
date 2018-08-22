@@ -34,30 +34,33 @@ class StaticWeights(Layer):
 
 def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embedding_matrix):
 
+    #####################################################################################################
+    # Variant 1
+
     def AttentionBlock(word_dim=200, sent_dim=200, maxlen=50):
         def inside(args):
             e_u = args[0]  # word-level an utterance representation (?,  50, 200)
             e_r = args[1]  # word-level a response  representation  (?, 50, 200)
             h_u = args[2]  # segment-level an utterance representation (?,  50, 200)
             h_r = args[3]  # segment-level a response  representation  (?, 50, 200)
-            t1 = Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(e_u)
-            t1 = Dot(axes=(-1, -1))([e_r, t1])
+            t1 = Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(e_u)  # (?, 50, 200)
+            t1 = Dot(axes=(-1, -1))([e_r, t1])                                          # (?, 50(resp dim), 50(utt dim))
             t1 = Lambda(lambda x: K.tanh(x))(t1)
-            t1 = Dense(maxlen)(t1)    # (?, 50, 50)
-            t1 = Softmax(axis=2)(t1)
+            t1 = Dense(maxlen, kernel_initializer=initializers.glorot_uniform())(t1)    # (?, 50, 50)
+            t1 = Softmax(axis=1)(t1)
             broadcasted_e_u = Lambda(lambda x: K.stack(x, axis=1))([e_u for word in range(maxlen)])
             t1 = Lambda(lambda x: tf.multiply(tf.expand_dims(x[0], axis=-1), x[1]))([t1, broadcasted_e_u])  # "weight" the utterance vector according to the response
-            t1 = Lambda(lambda x: tf.reduce_sum(x, axis=2))(t1)
+            t1 = Lambda(lambda x: tf.reduce_sum(x, axis=1))(t1)
             t1 = Lambda(lambda x: tf.multiply(x[0], x[1]))([t1, e_r])  # Hadamard product to the response vector
 
             t2 = Dense(sent_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(h_u)
             t2 = Dot(axes=(-1, -1))([h_r, t2])
             t2 = Lambda(lambda x: K.tanh(x))(t2)
-            t2 = Dense(maxlen)(t2)  # (?, 50, 50)
+            t2 = Dense(maxlen, kernel_initializer=initializers.glorot_uniform())(t2)  # (?, 50, 50)
             t2 = Softmax(axis=1)(t2)
             broadcasted_h_u = Lambda(lambda x: K.stack(x, axis=1))([h_u for word in range(maxlen)])
             t2 = Lambda(lambda x: tf.multiply(tf.expand_dims(x[0], axis=-1), x[1]))([t2, broadcasted_h_u])  # "weight" the utterance vector according to the response
-            t2 = Lambda(lambda x: tf.reduce_sum(x, axis=2))(t2)
+            t2 = Lambda(lambda x: tf.reduce_sum(x, axis=1))(t2)
             t2 = Lambda(lambda x: tf.multiply(x[0], x[1]))([t2, h_r])  # Hadamard product to the response vector
 
             # t = K.concatenate([t1, t2], axis=-1)  # concatenated vector t
@@ -73,9 +76,159 @@ def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
             segm_u = args[2]  # segment-level utterances Tensor (?, 10, 50, 200)
             segm_r = args[3]  # segment-level utterances Tensor (?, 50, 200)
 
+            att_block = AttentionBlock()  # 1 attention block
+            T = Lambda(lambda x: K.stack(x, axis=1), name="stack_T")(      # for each (utterance-response) pair
+                [
+                            att_block([
+                                Lambda(lambda x: x[:, turn], name="slice_U{}".format(turn))(word_u),
+                                word_r,
+                                Lambda(lambda x: x[:, turn], name="slice_H{}".format(turn))(segm_u),
+                                segm_r
+                            ])
+                     for turn in range(max_turn)
+                ]
+            )
+            return T
+        return inside
+    #####################################################################################################
+
+    #####################################################################################################
+    # Variant 2
+
+    def AttentionBlock2(word_dim=200, sent_dim=200, maxlen=50):
+        def inside(args):
+            e_u = args[0]  # word-level an utterance representation (?,  50, 200)
+            e_ri = args[1]  # word-level representation of an i-th word in a response (?, 200)
+            h_u = args[2]  # segment-level an utterance representation (?,  50, 200)
+            h_ri = args[3]  # segment-level representation of an i-th segment in a response (?, 200)
+
+            repr_eu = Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(e_u)
+            broadcasted_e_ri = Lambda(lambda x: K.stack(x, axis=1))([e_ri for word in range(maxlen)])
+            # broadcasted_e_ri = Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(broadcasted_e_ri)
+            repr_eri= Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(broadcasted_e_ri)
+            m1_i = Lambda(lambda x: K.tanh(x))(
+                        Lambda(lambda x: tf.reduce_sum(x, axis=1))(  # sum over 1st axis, resulting with a vector of shape (200, )
+                            Lambda(lambda x: K.stack(x, axis=1))(
+                                [repr_eu, repr_eri]
+                            )
+                        )
+            )
+            scores1 = Dense(1, trainable=True, use_bias=False, kernel_initializer=initializers.glorot_uniform())(m1_i)  # scores
+            weights1 = Softmax(axis=1)(scores1)
+            attended_eu = Lambda(lambda x: K.squeeze(Dot(axes=(1, 1))([x[0], x[1]]), axis=-1))([e_u, weights1])   # (?, 200)
+            t1 = Lambda(lambda x: tf.multiply(x[0], x[1]))([attended_eu, e_ri])  # Hadamard product to the response vector
+
+            # segments attention
+            repr_hu = Dense(sent_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(h_u)
+            broadcasted_h_ri = Lambda(lambda x: K.stack(x, axis=1))([h_ri for word in range(maxlen)])
+            # broadcasted_h_ri = Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(broadcasted_h_ri)
+            repr_hri = Dense(sent_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(broadcasted_h_ri)
+            m2_i = Lambda(lambda x: K.tanh(x))(
+                Lambda(lambda x: tf.reduce_sum(x, axis=1))(
+                    # sum over 1st axis, resulting with a vector of shape (200, )
+                    Lambda(lambda x: K.stack(x, axis=1))(
+                        [repr_hu, repr_hri]
+                    )
+                )
+            )
+            scores2 = Dense(1, trainable=True, use_bias=False, kernel_initializer=initializers.glorot_uniform())(m2_i)  # scores
+            weights2 = Softmax(axis=1)(scores2)
+            attended_hu = Lambda(lambda x: K.squeeze(Dot(axes=(1, 1))([x[0], x[1]]), axis=-1))([h_u, weights2])  # (?, 200)
+            t2 = Lambda(lambda x: tf.multiply(x[0], x[1]))([attended_hu, h_ri])  # Hadamard product to the response vector
+
+            # t = K.concatenate([t1, t2], axis=-1)  # concatenated vector t
+            t = Lambda(lambda x: K.stack(x, axis=1))([t1, t2])
+            t = Reshape((2 * sent_dim,))(t)
+            return t   # (?, 400)
+        return inside
+
+    def WordsAndRepresentationsAttention2(max_turn=10, maxlen=50):
+        def inside(args):
+            word_u = args[0]  # word-level utterances Tensor (?, 10, 50, 200)
+            word_r = args[1]  # word-level response Tensor   (?, 50, 200)
+            segm_u = args[2]  # segment-level utterances Tensor (?, 10, 50, 200)
+            segm_r = args[3]  # segment-level utterances Tensor (?, 50, 200)
             T = Lambda(lambda x: K.stack(x, axis=1))(      # for each (utterance-response) pair
                 [
-                            AttentionBlock()([
+                    Lambda(lambda x: K.stack(x, axis=1))(
+                        [
+                            AttentionBlock2()([
+                                Lambda(lambda x: x[:, turn])(word_u),
+                                Lambda(lambda x: x[:, resp_word])(word_r),
+                                Lambda(lambda x: x[:, turn])(segm_u),
+                                Lambda(lambda x: x[:, resp_word])(segm_r),
+                            ])
+                            for resp_word in range(maxlen)
+                        ]
+                    )
+                    for turn in range(max_turn)
+                ]
+            )
+            return T  # (?, 10, 50, 400)
+        return inside
+
+    #####################################################################################################
+
+
+    #####################################################################################################
+    # Variant 3
+
+    def AttentionBlock3(word_dim=200, sent_dim=200, maxlen=50):
+        def inside(args):
+            e_u = args[0]  # word-level representation of an utterance  (?,  50, 200)
+            e_ri = args[1]  # word-level representation of a response (?, 50, 200)
+            h_u = args[2]  # segment-level representation of an utterance (?,  50, 200)
+            h_ri = args[3]  # segment-level representation of a response (?, 50, 200)
+
+            broadcasted_eu = Lambda(lambda x: K.stack(x, axis=1))([e_u for word in range(maxlen)])  # (?, 50, 50, 200)
+            repr_eu = Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(broadcasted_eu) # (?, 50, 50, 200)
+            broadcasted_e_ri = Lambda(lambda x: K.stack(x, axis=1))([e_ri for word in range(maxlen)])
+            repr_eri= Dense(word_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(broadcasted_e_ri)  # (?, 50, 50, 200)
+            m1_i = Lambda(lambda x: K.tanh(x))(
+                        Lambda(lambda x: tf.reduce_sum(x, axis=1))(  # sum over 1st axis, resulting with a vector of shape (50, 200)
+                            Lambda(lambda x: K.stack(x, axis=1))(
+                                [repr_eu, repr_eri]
+                            )
+                        )
+            )
+            scores1 = Dense(1, trainable=True, use_bias=False, kernel_initializer=initializers.glorot_uniform())(m1_i)  # scores (?, 50, 50, 1)
+            weights1 = Softmax(axis=2)(scores1)
+            attended_eu = Lambda(lambda x: K.squeeze(Dot(axes=(2, 2))([x[0], x[1]]), axis=-1))([broadcasted_eu, weights1])   # (?, 50, 50, 200) x (?, 50, 50, 1) = (?, 50, 200)
+            t1 = Lambda(lambda x: tf.multiply(x[0], x[1]))([attended_eu, e_ri])  # Hadamard product to the response vector
+
+            # segments attention
+            broadcasted_hu = Lambda(lambda x: K.stack(x, axis=1))([e_u for word in range(maxlen)])  # (?, 50, 50, 200)
+            repr_hu = Dense(sent_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(broadcasted_hu)
+            broadcasted_h_ri = Lambda(lambda x: K.stack(x, axis=1))([h_ri for word in range(maxlen)])
+            repr_hri = Dense(sent_dim, trainable=True, use_bias=True, kernel_initializer=initializers.glorot_uniform())(broadcasted_h_ri)
+            m2_i = Lambda(lambda x: K.tanh(x))(
+                Lambda(lambda x: tf.reduce_sum(x, axis=1))(
+                    # sum over 1st axis, resulting with a vector of shape (200, )
+                    Lambda(lambda x: K.stack(x, axis=1))(
+                        [repr_hu, repr_hri]
+                    )
+                )
+            )
+            scores2 = Dense(1, trainable=True, use_bias=False, kernel_initializer=initializers.glorot_uniform())(m2_i)  # scores
+            weights2 = Softmax(axis=2)(scores2)
+            attended_hu = Lambda(lambda x: K.squeeze(Dot(axes=(2, 2))([x[0], x[1]]), axis=-1))([broadcasted_hu, weights2])
+            t2 = Lambda(lambda x: tf.multiply(x[0], x[1]))([attended_hu, h_ri])  # Hadamard product to the response vector
+
+            t = Lambda(lambda x: K.concatenate([x[0], x[1]], axis=-1))([t1, t2])  # concatenated vector t
+            return t   # (?, 50, 400)
+        return inside
+
+    def WordsAndRepresentationsAttention3(max_turn=10):
+        def inside(args):
+            word_u = args[0]  # word-level utterances Tensor (?, 10, 50, 200)
+            word_r = args[1]  # word-level response Tensor   (?, 50, 200)
+            segm_u = args[2]  # segment-level utterances Tensor (?, 10, 50, 200)
+            segm_r = args[3]  # segment-level utterances Tensor (?, 50, 200)
+
+            att_block = AttentionBlock3()  # 1 attention block
+            T = Lambda(lambda x: K.stack(x, axis=1))(      # for each (utterance-response) pair
+                [
+                            att_block([
                                 Lambda(lambda x: x[:, turn])(word_u),
                                 word_r,
                                 Lambda(lambda x: x[:, turn])(segm_u),
@@ -87,6 +240,7 @@ def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
             return T
         return inside
 
+    #####################################################################################################
 
     def DynamicAttention():
         def inside(args):
@@ -131,19 +285,19 @@ def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
                                 )
     sentence2vec = GRU(sent_dim, return_sequences=True, kernel_initializer=initializers.orthogonal())
 
-    context_word_embedding = TimeDistributed(embedding_layer)(context_input)
+    context_word_embedding = TimeDistributed(embedding_layer, name="U")(context_input)
     response_word_embedding = embedding_layer(response_input)
 
     # embedding_layer.trainable = False  # We need to set the param after TimeDistributed is applied
 
-    context_sent_embedding = TimeDistributed(sentence2vec)(context_word_embedding)
+    context_sent_embedding = TimeDistributed(sentence2vec, name="H")(context_word_embedding)
     response_sent_embedding = sentence2vec(response_word_embedding)
 
     # Attention Interaction Aggregation
-    T = WordsAndRepresentationsAttention()([context_word_embedding, response_word_embedding,
+    T = WordsAndRepresentationsAttention3()([context_word_embedding, response_word_embedding,
                                                 context_sent_embedding, response_sent_embedding])
-    gru2 = GRU(last_dim, return_sequences=False, kernel_initializer=initializers.orthogonal())
-    v = TimeDistributed(gru2)(T)
+    gru_v = GRU(400, return_sequences=False, kernel_initializer=initializers.orthogonal())
+    v = TimeDistributed(gru_v)(T)  # T: (?, 10, 50, 400) -> v: (?, 10, 400{take last hidden})
 
     ##############################################################################################
     # SMN last
