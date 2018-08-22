@@ -58,7 +58,7 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
                     # dot product by the last axis (embeddings dimension)
                     Dot(axes=(-1,-1))([
                         # Dense(sent_dim, use_bias=False, trainable=True)(Lambda(lambda x: x[:, turn])(u)), r]
-                        Dense(sent_dim, use_bias=False, trainable=True, kernel_initializer=initializers.glorot_uniform())(Lambda(lambda x: x[:, turn])(u)), r]
+                        Dense(sent_dim, use_bias=False, trainable=True)(Lambda(lambda x: x[:, turn])(u)), r]
                     ) for turn in range(max_turn)
                 ]
             )
@@ -70,7 +70,7 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
             """ Last attention layer """
             context_sent_embedding = args[0]
             match = args[1]
-            out_dynamic = GRU(last_dim, return_sequences=True, kernel_initializer=initializers.orthogonal())(match)
+            out_dynamic = GRU(last_dim, return_sequences=True)(match)
             # out_dynamic = Lambda(lambda x: tf.Print(input_=x, data=[x], message='\ngru: ', summarize=100))(out_dynamic)
             t = Lambda(lambda x: K.stack(x, axis=1))(
                 [
@@ -78,8 +78,8 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
                         Lambda(lambda x: tf.reduce_sum(x, axis=1))(  # sum over 1st axis, resulting with a vector of shape (q, )
                             Lambda(lambda x: K.stack(x, axis=1))(
                                 [
-                                    Dense(last_dim, use_bias=True, kernel_initializer=initializers.glorot_uniform())(Lambda(lambda x: x[:, i, -1, :])(context_sent_embedding)),
-                                    Dense(last_dim, use_bias=True, kernel_initializer=initializers.glorot_uniform())(Lambda(lambda x: x[:, i])(out_dynamic))
+                                    Dense(last_dim, use_bias=True)(Lambda(lambda x: x[:, i, -1, :])(context_sent_embedding)),
+                                    Dense(last_dim, use_bias=True)(Lambda(lambda x: x[:, i])(out_dynamic))
                                 ]
                             )
                         )
@@ -88,7 +88,7 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
                 ]
             )
             # t of shape (?, max_turn, q)
-            scores = Dense(1, use_bias=False, kernel_initializer=initializers.glorot_uniform())(t)
+            scores = Dense(1, use_bias=False)(t)
             # scores = Lambda(lambda x: tf.Print(input_=x, data=[x], message='\nscores = ', summarize=10))(scores)
             weights = Softmax(axis=1)(scores)
             # weights = Lambda(lambda x: tf.Print(input_=x, data=[x], message='\nsoftmax scores = ', summarize=10))(weights)
@@ -106,7 +106,7 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
                                 weights=[embedding_matrix],
                                 input_length=maxlen
                                 )
-    sentence2vec = GRU(sent_dim, return_sequences=True, kernel_initializer=initializers.orthogonal())
+    sentence2vec = GRU(sent_dim, return_sequences=True)
 
     context_word_embedding = TimeDistributed(embedding_layer)(context_input)
     response_word_embedding = embedding_layer(response_input)
@@ -123,7 +123,7 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
     conv = TimeDistributed(Conv2D(8, (3, 3), activation='relu', data_format='channels_first', kernel_initializer=initializers.he_normal()))(match_2ch)
     pool = TimeDistributed(MaxPooling2D(pool_size=(3, 3), data_format='channels_first'))(conv)
     flat = TimeDistributed(Flatten())(pool)
-    match = TimeDistributed(Dense(last_dim, activation='tanh', kernel_initializer=initializers.glorot_uniform()))(flat)  # v
+    match = TimeDistributed(Dense(last_dim, activation='tanh'))(flat)  # v
 
     ##############################################################################################
     # SMN last
@@ -142,7 +142,7 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
     # SMN dynamic
     # attention over hidden states h'
     output_dynamic = DynamicAttention()([context_sent_embedding, match])   # (?, q)
-    output = Dense(1, activation='sigmoid', kernel_initializer=initializers.glorot_uniform())(output_dynamic)
+    output = Dense(1, activation='sigmoid')(output_dynamic)
     ##############################################################################################
 
     model = Model(inputs=[context_input, response_input], outputs=[output])
