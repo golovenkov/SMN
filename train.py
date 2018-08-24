@@ -30,7 +30,7 @@ def main():
     psr.add_argument('--train_data', default='train.joblib')
     psr.add_argument('--valid_data', default='valid.joblib')
     psr.add_argument('--model_name', default='SMN_last')
-    psr.add_argument('--batch_size', default=512, type=int)
+    psr.add_argument('--batch_size', default=256, type=int)
     args = psr.parse_args()
 
     print('load embedding matrix')
@@ -64,25 +64,26 @@ def main():
     valid_labels = valid_data['labels']
 
     # steps_per_epoch = 1000000/bs/4 to validate each 1/4th true epoch
-    # def myGenerator(context, response, labels, data_len=1000000, bs=200):
-    #     while True:
-    #         print('\nreshuffle train data')
-    #         idx = np.array([i for i in range(data_len)])
-    #         np.random.shuffle(idx)
-    #         for i in range(data_len//bs):  # 1875 * 32 = 60000 -> # of training samples
-    #             yield [context[idx[i * bs:(i + 1) * bs]], response[idx[i * bs:(i + 1) * bs]]], labels[idx[i * bs:(i + 1) * bs]]
+    def myGenerator(context, response, labels, data_len=1000000, bs=200):
+        while True:
+            print('\nreshuffle train data')
+            idx = np.array([i for i in range(data_len)])
+            np.random.shuffle(idx)
+            for i in range(data_len//bs):  # 1875 * 32 = 60000 -> # of training samples
+                yield [np.array(context[idx[i * bs:(i + 1) * bs]]), np.array(response[idx[i * bs:(i + 1) * bs]])], labels[idx[i * bs:(i + 1) * bs]]
 
     print('fitting')
     model.fit(
         [context, response],
         labels,
-        # myGenerator(context, response, labels),
+        # myGenerator(train_data['context'], train_data['response'], train_data['labels']),
         validation_data=([valid_context, valid_response], valid_labels),
         batch_size=args.batch_size,
         epochs=10,
         callbacks=[early_stopping, model_checkpoint]
         ,
-        # steps_per_epoch = (len(context) // 200 // 4),
+        verbose=1,
+        # steps_per_epoch = (len(train_data['context']) // 200 ),
         # validation_steps= (len(valid_context) // 200)
     )
 

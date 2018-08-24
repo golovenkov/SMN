@@ -40,14 +40,14 @@ def main():
     print('load data')
     test_data = joblib.load(args.test_data)
 
-    # print('load embedding matrix')
-    # embedding_matrix = joblib.load(args.embedding_matrix)
+    print('load embedding matrix')
+    embedding_matrix = joblib.load(args.embedding_matrix)
 
     # json_string = open(args.model_name + '.json').read()
     # model = model_from_json(json_string)
 
     print('build model')
-    model = build_SAN(10, 50, 200, 200, 50, 282132, None)
+    model = build_SAN(10, 50, 200, 200, 50, 282132, embedding_matrix)
     model.load_weights(args.model_name + '.h5')
 
     model.compile(loss='binary_crossentropy',

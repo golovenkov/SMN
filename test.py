@@ -34,20 +34,22 @@ def main():
     psr = argparse.ArgumentParser()
     psr.add_argument('--test_data', default='test.joblib')
     psr.add_argument('--model_name', default='SMN_last')
+    psr.add_argument('--num_words', default=50000, type=int)
     psr.add_argument('--embedding_matrix', default='embedding_matrix.joblib')
+    psr.add_argument('--version', default='1')
     args = psr.parse_args()
 
     print('load data')
     test_data = joblib.load(args.test_data)
 
-    # print('load embedding matrix')
-    # embedding_matrix = joblib.load(args.embedding_matrix)
+    print('load embedding matrix')
+    embedding_matrix = joblib.load(args.embedding_matrix)
 
     # json_string = open(args.model_name + '.json').read()
     # model = model_from_json(json_string)
 
     print('build model')
-    model = build_SMN(10, 50, 200, 200, 50, 282132, None)
+    model = build_SMN(10, 50, 200, 200, 50, args.num_words, None)
     model.load_weights(args.model_name + '.h5')
 
     model.compile(loss='binary_crossentropy',
@@ -59,9 +61,18 @@ def main():
 
     print('predict')
     y = model.predict([context, response], batch_size=2000, verbose=1)
-    y = np.array(y).reshape(50000, 10)
-    y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
-    for n in [1, 2, 5]:
-        print('Recall @ ({}, 10): {:g}'.format(n, evaluate_recall(y, n)))
 
+    if args.version == "1":
+        dim1 = 50000
+        dim2 = 10
+        recalls = [1, 2, 5]
+    else:
+        dim1 = 100
+        dim2 = 100
+        recalls = [1, 2, 5, 10, 50, 100]
+    y = np.array(y).reshape(dim1, dim2)
+    y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
+    for n in recalls:
+        print('Recall @ ({}, {}): {:g}'.format(n, dim2, evaluate_recall(y, n)))
+    
 if __name__ == '__main__': main()

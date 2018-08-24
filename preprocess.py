@@ -6,28 +6,82 @@ from tqdm import tqdm
 from gensim.models.word2vec import Word2Vec
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
-# import gensim
+import ijson
+import numpy as np
 
-def build_multiturn_data(multiturn_data):
+def create_dialog_iter(filename, mode):
+    """
+    Returns an iterator over a JSON file.
+    :param filename:
+    :return:
+    """
+    with open(filename, 'rb') as f:
+        json_data = ijson.items(f, 'item')
+        for entry in json_data:
+
+            dialog = entry
+            rows = []
+            message = ''
+            utterances = dialog['messages-so-far']
+            for msg in utterances:
+                message += msg['utterance']
+                message += ' _eot_ '
+
+            # true response
+            true_response = dialog['options-for-correct-answers'][0]['utterance']
+
+            fake_responses = []
+            correct_answer = dialog['options-for-correct-answers'][0]
+            target_id = correct_answer['candidate-id']
+            for i, utterance in enumerate(dialog['options-for-next']):
+                if utterance['candidate-id'] != target_id:
+                    fake_responses.append(utterance['utterance'])
+
+            true = (message, true_response, 1)
+            if mode == 'train':
+                # return a list of 200 tuples
+                for fake_response in np.random.choice(fake_responses, 10):
+                    rows.append(true)
+                    rows.append((message, fake_response, 0))
+                # rows.append(true)
+                # rows.append(true)
+            else:
+                # return a list of 100 tuples
+                rows.append(true)
+                for fake_response in fake_responses:
+                    rows.append((message, fake_response, 0))
+
+            # need to return [(message, response, label), ...]
+            # print(len(rows))
+            yield rows
+
+def build_multiturn_data(multiturn_data, version="1", mode="train"):
     contexts = []
     responses = []
     labels = []
-    with codecs.open(multiturn_data,'r','utf-8') as f:
-        for line in tqdm(f):
-            line = line.replace('_','')
-            parts = line.strip().split('\t')
+    if version == "1":
+        with codecs.open(multiturn_data,'r','utf-8') as f:
+            for line in tqdm(f):
+                line = line.replace('_','')
+                parts = line.strip().split('\t')
 
-            lable = parts[0]
-            message = ''
-            for i in range(1, len(parts)-1, 1):
-                message += parts[i]
-                message += ' _eot_ '
+                lable = parts[0]
+                message = ''
+                for i in range(1, len(parts)-1, 1):
+                    message += parts[i]
+                    message += ' _eot_ '
 
-            response = parts[-1]
+                response = parts[-1]
 
-            contexts.append(message)
-            responses.append(response)
-            labels.append(lable)
+                contexts.append(message)
+                responses.append(response)
+                labels.append(lable)
+    else:
+        for samples in create_dialog_iter(multiturn_data, mode):
+            for sample in samples:
+                contexts.append(sample[0])
+                responses.append((sample[1]))
+                labels.append(sample[2])
 
     return contexts, responses, np.array(labels)
 
@@ -72,17 +126,24 @@ def main():
     psr.add_argument('--train_data', default='ubuntu_data/train.txt')
     psr.add_argument('--valid_data', default='ubuntu_data/valid.txt')
     psr.add_argument('--test_data', default='ubuntu_data/test.txt')
+    psr.add_argument('--version', default=1)
     args = psr.parse_args()
 
     print('load data')
-    train_context, train_response, train_labels = build_multiturn_data(args.train_data)
-    valid_context, valid_response, valid_labels = build_multiturn_data(args.valid_data)
-    test_context, test_response, test_labels = build_multiturn_data(args.test_data)
+    if args.version == '1':
+        train_context, train_response, train_labels = build_multiturn_data(args.train_data)
+        valid_context, valid_response, valid_labels = build_multiturn_data(args.valid_data)
+        test_context, test_response, test_labels = build_multiturn_data(args.test_data)
+    else:
+        train_context, train_response, train_labels = build_multiturn_data(args.train_data, args.version)
+        valid_context, valid_response, valid_labels = build_multiturn_data(args.valid_data, args.version)
 
     print('tokenize')
     global tokenizer, maxlen
-    tokenizer = Tokenizer(num_words=args.num_words)
-    tokenizer.fit_on_texts(np.append(train_context, train_response))
+    tokenizer = Tokenizer(num_words=args.num_words, filters="\t\n,", split=' ')
+    tokenizer.fit_on_texts(np.append(train_context, train_response))  # numpy can throw MemoryError here
+    # tokenizer.fit_on_texts(train_context)
+    # tokenizer.fit_on_texts(train_response)
     word_index = tokenizer.word_index
     print('Found %s unique tokens.' % len(word_index))
 
@@ -94,17 +155,20 @@ def main():
     train_response = preprocess_texts(train_response, args.maxlen)
     valid_context = preprocess_multi_turn_texts(valid_context, args.max_turn, args.maxlen)
     valid_response = preprocess_texts(valid_response, args.maxlen)
-    test_context = preprocess_multi_turn_texts(test_context, args.max_turn, args.maxlen)
-    test_response = preprocess_texts(test_response, args.maxlen)
+    if args.version == '1':
+        test_context = preprocess_multi_turn_texts(test_context, args.max_turn, args.maxlen)
+        test_response = preprocess_texts(test_response, args.maxlen)
 
     train_data = {'context': train_context, 'response': train_response, 'labels': train_labels}
     valid_data = {'context': valid_context, 'response': valid_response, 'labels': valid_labels}
-    test_data = {'context': test_context, 'response': test_response, 'labels': test_labels}
+    if args.version == '1':
+        test_data = {'context': test_context, 'response': test_response, 'labels': test_labels}
 
     print('dump')
     joblib.dump(train_data, 'train.joblib', protocol=-1, compress=3)
     joblib.dump(valid_data, 'valid.joblib', protocol=-1, compress=3)
-    joblib.dump(test_data, 'test.joblib', protocol=-1, compress=3)
+    if args.version == '1':
+        joblib.dump(test_data, 'test.joblib', protocol=-1, compress=3)
     joblib.dump(embedding_matrix, 'embedding_matrix.joblib', protocol=-1, compress=3)
 
 if __name__ == '__main__': main()

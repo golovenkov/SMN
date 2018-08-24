@@ -8,3 +8,5 @@ ubuntu_data/
 .idea
 info/
 __pycache__
+helpers
+ubuntu_data_v2

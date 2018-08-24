@@ -46,7 +46,7 @@ def main():
     # from keras.utils import plot_model
     # plot_model(model, to_file='san.png')
 
-    # print(model.summary())    # The model is really huge
+    print(model.summary())    # The model is really huge
 
     early_stopping = EarlyStopping(monitor='val_loss', patience=2)
     model_checkpoint = ModelCheckpoint(args.model_name + '.h5', save_best_only=True, save_weights_only=True)
