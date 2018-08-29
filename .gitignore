@@ -10,3 +10,12 @@ info/
 __pycache__
 helpers
 ubuntu_data_v2
+Graph/
+GraphSAN/
+glove.twitter.27B.200d.txt
+tf/SCN_Graph/
+tf/model/
+w2v/
+v2_joblib/
+tokenizer.pickle
+ubuntu_data.mul.200d.fullw2v.train

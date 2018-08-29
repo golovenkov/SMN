@@ -156,9 +156,7 @@ def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
             m1_i = Lambda(lambda x: K.tanh(x))(
                 Lambda(lambda x: tf.reduce_sum(x, axis=1))(
                     Lambda(lambda x: K.stack(x, axis=1))(
-                        [
                             [repr_eu, broadcasted_e_ri]
-                        ]
                     )
                 )
 
@@ -198,9 +196,7 @@ def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
             m2_i = Lambda(lambda x: K.tanh(x))(
                 Lambda(lambda x: tf.reduce_sum(x, axis=1))(
                     Lambda(lambda x: K.stack(x, axis=1))(
-                        [
                             [repr_hu, broadcasted_h_ri]
-                        ]
                     )
                 )
                     # Lambda(lambda x: x[0] + x[1])(  # sum over 1st axis, resulting with a matrix of shape (50, 200, )
@@ -459,7 +455,7 @@ def build_SAN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
           context_sent_embedding, response_sent_embedding])
 
     # Get hidden vectors v = [v1, ..., v10]
-    gru_v = GRU(50, return_sequences=False)  # may be use 200 instead of 400
+    gru_v = GRU(400, return_sequences=False)  # may be use 200 instead of 400
     v = TimeDistributed(gru_v)(T)  # T: (?, 10, 50, 400) -> v: (?, 10, 400{take last hidden})
 
     ##############################################################################################

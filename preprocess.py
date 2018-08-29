@@ -3,13 +3,13 @@ import joblib
 import argparse
 import codecs
 from tqdm import tqdm
-from gensim.models.word2vec import Word2Vec
+from gensim.models.word2vec import Word2Vec, Text8Corpus
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 import ijson
 import numpy as np
 
-def create_dialog_iter(filename, mode):
+def create_dialog_iter(filename, mode="train", sampling="10-10"):
     """
     Returns an iterator over a JSON file.
     :param filename:
@@ -39,27 +39,41 @@ def create_dialog_iter(filename, mode):
 
             true = (message, true_response, 1)
             if mode == 'train':
-                # return a list of 200 tuples
-                for fake_response in np.random.choice(fake_responses, 10):
+                if sampling == '1-9':
                     rows.append(true)
-                    rows.append((message, fake_response, 0))
-                # rows.append(true)
-                # rows.append(true)
-            else:
+                    for fake_response in np.random.choice(fake_responses, 9):
+                        rows.append((message, fake_response, 0))
+                elif sampling == '10-10':
+                    for fake_response in np.random.choice(fake_responses, 10):
+                        rows.append(true)
+                        rows.append((message, fake_response, 0))
+                elif sampling == '20-20':
+                    for fake_response in np.random.choice(fake_responses, 20):
+                        rows.append(true)
+                        rows.append((message, fake_response, 0))
+                elif sampling == '30-30':
+                    for fake_response in np.random.choice(fake_responses, 30):
+                        rows.append(true)
+                        rows.append((message, fake_response, 0))
+
+            elif mode == 'valid':
                 # return a list of 100 tuples
                 rows.append(true)
                 for fake_response in fake_responses:
                     rows.append((message, fake_response, 0))
+                # rows.append(true)
+                # for fake_response in np.random.choice(fake_responses, 9):
+                #     rows.append((message, fake_response, 0))
 
             # need to return [(message, response, label), ...]
             # print(len(rows))
             yield rows
 
-def build_multiturn_data(multiturn_data, version="1", mode="train"):
+def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-10'):
     contexts = []
     responses = []
     labels = []
-    if version == "1":
+    if version == 1:
         with codecs.open(multiturn_data,'r','utf-8') as f:
             for line in tqdm(f):
                 line = line.replace('_','')
@@ -76,8 +90,8 @@ def build_multiturn_data(multiturn_data, version="1", mode="train"):
                 contexts.append(message)
                 responses.append(response)
                 labels.append(lable)
-    else:
-        for samples in create_dialog_iter(multiturn_data, mode):
+    elif version == 2:
+        for samples in create_dialog_iter(multiturn_data, mode, sampling):
             for sample in samples:
                 contexts.append(sample[0])
                 responses.append((sample[1]))
@@ -126,7 +140,8 @@ def main():
     psr.add_argument('--train_data', default='ubuntu_data/train.txt')
     psr.add_argument('--valid_data', default='ubuntu_data/valid.txt')
     psr.add_argument('--test_data', default='ubuntu_data/test.txt')
-    psr.add_argument('--version', default=1)
+    psr.add_argument('--version', default=1, type=int)
+    psr.add_argument('--sampling', default='10-10', type=str)
     args = psr.parse_args()
 
     print('load data')
@@ -135,15 +150,19 @@ def main():
         valid_context, valid_response, valid_labels = build_multiturn_data(args.valid_data)
         test_context, test_response, test_labels = build_multiturn_data(args.test_data)
     else:
-        train_context, train_response, train_labels = build_multiturn_data(args.train_data, args.version)
-        valid_context, valid_response, valid_labels = build_multiturn_data(args.valid_data, args.version)
+        train_context, train_response, train_labels = build_multiturn_data(args.train_data, args.version, "train", args.sampling)
+        valid_context, valid_response, valid_labels = build_multiturn_data(args.valid_data, args.version, "valid", args.sampling)
+
 
     print('tokenize')
     global tokenizer, maxlen
     tokenizer = Tokenizer(num_words=args.num_words, filters="\t\n,", split=' ')
-    tokenizer.fit_on_texts(np.append(train_context, train_response))  # numpy can throw MemoryError here
-    # tokenizer.fit_on_texts(train_context)
-    # tokenizer.fit_on_texts(train_response)
+    # tokenizer.fit_on_texts(np.append(train_context, train_response))  # numpy can throw MemoryError here
+    if args.version == 1:
+        tokenizer.fit_on_texts(np.append(train_context, train_response))
+    elif args.version == 2:
+        sentences = Text8Corpus("ubuntu_data_v2/train.txt")
+        tokenizer.fit_on_texts(sentences)
     word_index = tokenizer.word_index
     print('Found %s unique tokens.' % len(word_index))
 
@@ -155,19 +174,19 @@ def main():
     train_response = preprocess_texts(train_response, args.maxlen)
     valid_context = preprocess_multi_turn_texts(valid_context, args.max_turn, args.maxlen)
     valid_response = preprocess_texts(valid_response, args.maxlen)
-    if args.version == '1':
+    if args.version == 1:
         test_context = preprocess_multi_turn_texts(test_context, args.max_turn, args.maxlen)
         test_response = preprocess_texts(test_response, args.maxlen)
 
     train_data = {'context': train_context, 'response': train_response, 'labels': train_labels}
     valid_data = {'context': valid_context, 'response': valid_response, 'labels': valid_labels}
-    if args.version == '1':
+    if args.version == 1:
         test_data = {'context': test_context, 'response': test_response, 'labels': test_labels}
 
     print('dump')
     joblib.dump(train_data, 'train.joblib', protocol=-1, compress=3)
     joblib.dump(valid_data, 'valid.joblib', protocol=-1, compress=3)
-    if args.version == '1':
+    if args.version == 1:
         joblib.dump(test_data, 'test.joblib', protocol=-1, compress=3)
     joblib.dump(embedding_matrix, 'embedding_matrix.joblib', protocol=-1, compress=3)
 

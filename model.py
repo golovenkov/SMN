@@ -1,7 +1,7 @@
 import numpy as np
 np.random.seed(42)
 
-from keras.layers import Conv2D, MaxPooling2D, Embedding, GRU
+from keras.layers import Conv2D, MaxPooling2D, Embedding, GRU, Reshape, Masking
 from keras.layers import TimeDistributed
 from keras.layers import Dense, Input, Flatten, Lambda, Softmax, Dot
 from keras.models import Model
@@ -101,14 +101,16 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
     context_input = Input(shape=(max_turn, maxlen), dtype='int32')
     response_input = Input(shape=(maxlen,), dtype='int32')
 
-    embedding_layer = Embedding(num_words,
+    embedding_layer = Embedding(num_words+1,
                                 word_dim,
-                                weights=[embedding_matrix],
-                                input_length=maxlen
+                                # weights=[embedding_matrix],   # weights initialization does not work as it should!..
+                                input_length=maxlen,
+                                trainable=True,
                                 )
     sentence2vec = GRU(sent_dim, return_sequences=True)
 
     context_word_embedding = TimeDistributed(embedding_layer)(context_input)
+    # context_word_embedding = Lambda(lambda x: K.stack(x, axis=1))([embedding_layer(Lambda(lambda x: x[:, turn])(context_input)) for turn in range(max_turn)])
     response_word_embedding = embedding_layer(response_input)
 
     # embedding_layer.trainable = False  # We need to set the param after TimeDistributed is applied
@@ -127,8 +129,8 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
 
     ##############################################################################################
     # SMN last
-    # output_last = GRU(last_dim, kernel_initializer=initializers.orthogonal())(match)
-    # output = Dense(1, activation='sigmoid', kernel_initializer=initializers.glorot_uniform())(output_last)  # DMN_last
+    output_last = GRU(last_dim)(match)
+    output = Dense(1, activation='sigmoid')(output_last)  # DMN_last
     ##############################################################################################
 
     ##############################################################################################
@@ -141,8 +143,8 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
     ##############################################################################################
     # SMN dynamic
     # attention over hidden states h'
-    output_dynamic = DynamicAttention()([context_sent_embedding, match])   # (?, q)
-    output = Dense(1, activation='sigmoid')(output_dynamic)
+    # output_dynamic = DynamicAttention()([context_sent_embedding, match])   # (?, q)
+    # output = Dense(1, activation='sigmoid')(output_dynamic)
     ##############################################################################################
 
     model = Model(inputs=[context_input, response_input], outputs=[output])

@@ -36,7 +36,8 @@ def main():
     psr.add_argument('--model_name', default='SMN_last')
     psr.add_argument('--num_words', default=50000, type=int)
     psr.add_argument('--embedding_matrix', default='embedding_matrix.joblib')
-    psr.add_argument('--version', default='1')
+    psr.add_argument('--version', default=1, type=int)
+    psr.add_argument('--batch_size', default=2000, type=int)
     args = psr.parse_args()
 
     print('load data')
@@ -49,7 +50,7 @@ def main():
     # model = model_from_json(json_string)
 
     print('build model')
-    model = build_SMN(10, 50, 200, 200, 50, args.num_words, None)
+    model = build_SMN(10, 50, 200, 200, 50, args.num_words, embedding_matrix)
     model.load_weights(args.model_name + '.h5')
 
     model.compile(loss='binary_crossentropy',
@@ -59,17 +60,23 @@ def main():
     context = np.array(test_data['context'])
     response = np.array(test_data['response'])
 
-    print('predict')
-    y = model.predict([context, response], batch_size=2000, verbose=1)
+    print(context[0], response[0])
 
-    if args.version == "1":
+    print('predict')
+    y = model.predict([context, response], batch_size=args.batch_size, verbose=1)
+
+    if args.version == 1:
         dim1 = 50000
         dim2 = 10
         recalls = [1, 2, 5]
-    else:
-        dim1 = 100
+    elif args.version == 2:
+        dim1 = 5000
         dim2 = 100
         recalls = [1, 2, 5, 10, 50, 100]
+        # below is for grouping in 10 samples
+        # dim1 = 5000
+        # dim2 = 10
+        # recalls = [1, 2, 5]
     y = np.array(y).reshape(dim1, dim2)
     y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
     for n in recalls:

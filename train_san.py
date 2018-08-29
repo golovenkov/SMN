@@ -3,7 +3,7 @@ import numpy as np
 np.random.seed(42)
 
 import joblib
-from keras.callbacks import ModelCheckpoint, EarlyStopping
+from keras.callbacks import ModelCheckpoint, EarlyStopping, TensorBoard
 
 import tensorflow as tf
 tf.set_random_seed(42)
@@ -47,6 +47,11 @@ def main():
     # plot_model(model, to_file='san.png')
 
     print(model.summary())    # The model is really huge
+
+    # Tensorboard
+    # tbCallBack = TensorBoard(log_dir='./GraphSAN', histogram_freq=0, batch_size=32, write_graph=True, write_grads=False,
+    #                          write_images=False, embeddings_freq=0, embeddings_layer_names=None,
+    #                          embeddings_metadata=None)
 
     early_stopping = EarlyStopping(monitor='val_loss', patience=2)
     model_checkpoint = ModelCheckpoint(args.model_name + '.h5', save_best_only=True, save_weights_only=True)

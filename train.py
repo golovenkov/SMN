@@ -3,7 +3,7 @@ import numpy as np
 np.random.seed(42)
 
 import joblib
-from keras.callbacks import ModelCheckpoint, EarlyStopping
+from keras.callbacks import ModelCheckpoint, EarlyStopping, TensorBoard
 
 import tensorflow as tf
 tf.set_random_seed(42)
@@ -36,21 +36,6 @@ def main():
     print('load embedding matrix')
     embedding_matrix = joblib.load(args.embedding_matrix)
 
-    print('build model')
-    model = build_SMN(args.max_turn, args.maxlen, args.word_dim, args.sent_dim, args.last_dim, args.num_words, embedding_matrix)
-
-    model.compile(loss='binary_crossentropy',
-                  optimizer='adam',
-                  metrics=['accuracy'])
-
-    # json_string = model.to_json()
-    # open(args.model_name + '.json', 'w').write(json_string)
-
-    print(model.summary())
-
-    early_stopping = EarlyStopping(monitor='val_loss', patience=2)
-    model_checkpoint = ModelCheckpoint(args.model_name + '.h5', save_best_only=True, save_weights_only=True)
-
     print('load train data')
     train_data = joblib.load(args.train_data)
     context = np.array(train_data['context'])
@@ -63,6 +48,26 @@ def main():
     valid_response = np.array(valid_data['response'])
     valid_labels = valid_data['labels']
 
+    print('build model')
+    model = build_SMN(args.max_turn, args.maxlen, args.word_dim, args.sent_dim, args.last_dim, args.num_words, embedding_matrix)
+
+    model.compile(loss='binary_crossentropy',
+                  optimizer='adam',
+                  metrics=['accuracy'])
+
+    # json_string = model.to_json()
+    # open(args.model_name + '.json', 'w').write(json_string)
+
+    print(model.summary())
+
+    # Tensorboard
+    tbCallBack = TensorBoard(log_dir='./Graph', histogram_freq=0, batch_size=32, write_graph=True, write_grads=False,
+                             write_images=False, embeddings_freq=0, embeddings_layer_names=None,
+                             embeddings_metadata=None)
+
+    early_stopping = EarlyStopping(monitor='val_loss', patience=4)
+    model_checkpoint = ModelCheckpoint(args.model_name + 'weights.{epoch:04d}-{val_loss:.2f}.h5', save_weights_only=True)
+
     # steps_per_epoch = 1000000/bs/4 to validate each 1/4th true epoch
     def myGenerator(context, response, labels, data_len=1000000, bs=200):
         while True:
@@ -72,6 +77,18 @@ def main():
             for i in range(data_len//bs):  # 1875 * 32 = 60000 -> # of training samples
                 yield [np.array(context[idx[i * bs:(i + 1) * bs]]), np.array(response[idx[i * bs:(i + 1) * bs]])], labels[idx[i * bs:(i + 1) * bs]]
 
+    print('example train context:')
+    print(context[0])
+
+    print('example train response:')
+    print(response[0])
+
+    print('example the first 30 train labels:')
+    print(labels[:30])
+
+    print('example the first 102 valid labels:')
+    print(valid_labels[:102])
+
     print('fitting')
     model.fit(
         [context, response],
@@ -79,8 +96,8 @@ def main():
         # myGenerator(train_data['context'], train_data['response'], train_data['labels']),
         validation_data=([valid_context, valid_response], valid_labels),
         batch_size=args.batch_size,
-        epochs=10,
-        callbacks=[early_stopping, model_checkpoint]
+        epochs=20,
+        callbacks=[early_stopping, model_checkpoint, tbCallBack]
         ,
         verbose=1,
         # steps_per_epoch = (len(train_data['context']) // 200 ),
