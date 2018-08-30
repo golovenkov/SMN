@@ -376,13 +376,21 @@ def main():
         test_context, test_response, test_labels = build_multiturn_data("../ubuntu_data/test.txt")
     else:
         # because we don't have test data for Ubuntu Corpus v2 yet!
-        train_context, train_response, train_labels = \
-            build_multiturn_data("../ubuntu_data_v2/ubuntu_train_subtask_1.json", args.version, "train", args.sampling)
-        valid_context, valid_response, valid_labels =\
-            build_multiturn_data("../ubuntu_data_v2/ubuntu_dev_subtask_1.json", args.version, "valid", args.sampling)
+        # train_context, train_response, train_labels = \
+        #     build_multiturn_data("../ubuntu_data_v2/ubuntu_train_subtask_1.json", args.version, "train", args.sampling)
+        # valid_context, valid_response, valid_labels =\
+        #     build_multiturn_data("../ubuntu_data_v2/ubuntu_dev_subtask_1.json", args.version, "valid", args.sampling)
 
         # or load existing pickled versions!!!
         # TODO: load train_context, etc.
+        with open('../v2_joblib/prep_train_context.pickle', 'rb') as handle:
+            train_context = pickle.load(handle)
+        with open('../v2_joblib/prep_train_response.pickle', 'rb') as handle:
+            train_response = pickle.load(handle)
+        with open('../v2_joblib/prep_valid_context.pickle', 'rb') as handle:
+            valid_context = pickle.load(handle)
+        with open('../v2_joblib/prep_valid_response.pickle', 'rb') as handle:
+            valid_response = pickle.load(handle)
 
     embedding_matrix = None
     tokenizer = None
@@ -503,16 +511,16 @@ def main():
     ####################3
 
     print('dump processed data')
-    joblib.dump(train_data_context, '../v2_joblib/train_context.joblib', protocol=-1, compress=3)
-    joblib.dump(train_data_response, '../v2_joblib/train_response.joblib', protocol=-1, compress=3)
+    joblib.dump(train_data_context, 'train_context.joblib', protocol=-1, compress=3)
+    joblib.dump(train_data_response, 'train_response.joblib', protocol=-1, compress=3)
 
-    joblib.dump(valid_data_context, '../v2_joblib/valid_context.joblib', protocol=-1, compress=3)
-    joblib.dump(valid_data_response, '../v2_joblib/valid_response.joblib', protocol=-1, compress=3)
+    joblib.dump(valid_data_context, 'valid_context.joblib', protocol=-1, compress=3)
+    joblib.dump(valid_data_response, 'valid_response.joblib', protocol=-1, compress=3)
     if args.version == 1:
-        joblib.dump(test_data_context, '../v2_joblib/test_context.joblib', protocol=-1, compress=3)
-        joblib.dump(test_data_response, '../v2_joblib/test_response.joblib', protocol=-1, compress=3)
+        joblib.dump(test_data_context, 'test_context.joblib', protocol=-1, compress=3)
+        joblib.dump(test_data_response, 'test_response.joblib', protocol=-1, compress=3)
 
     print('dump embedding matrix')
-    joblib.dump(embedding_matrix, '../v2_joblib/embedding_matrix.joblib', protocol=-1, compress=3)
+    joblib.dump(embedding_matrix, 'embedding_matrix.joblib', protocol=-1, compress=3)
 
 if __name__ == '__main__': main()

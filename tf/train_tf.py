@@ -31,9 +31,10 @@ class SCN():
         self.rnn_units = 200
         # self.total_words = 434511
         self.total_words = num_words+1
-        self.batch_size = 500
+        self.batch_size = 200
         self.valid_batch_size = 2000
-        self.validation_step = 500000
+        # self.validation_step = 500000    # for Ubuntu v1
+        self.validation_step = 100000    # for Ubuntu v3
 
         self.embedding_matrix = embedding_matrix
 
@@ -115,9 +116,25 @@ class SCN():
         optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
         self.train_op = optimizer.minimize(self.total_loss)
 
-    def load_embeddings(self, embeddings_filename, word_embedding_size=200):
-        """ Load embeddings """
-        pass
+    def create_indices(self, data_length, shuffle=True):
+        indices_10 = []
+        indices_100 = []
+        idx = 0
+        shift = 100
+        epoch = 0
+        indices = [i for i in range(1, 100)]
+        while epoch < data_length // shift:
+            shuffled_indices = [i for i in range(1, 100)]
+            if shuffle:
+                np.random.shuffle(shuffled_indices)
+            indices_10.append(idx)
+            indices_10.extend([i + shift * epoch for i in shuffled_indices[:9]])   # shuffle for r10@k
+            indices_100.append(idx)
+            indices_100.extend([i + shift * epoch for i in indices])          # do not shuffle for r100@k
+            idx += shift
+            epoch += 1
+
+        return indices_10, indices_100
 
     def train(self, countinue_train=False, previous_modelpath="model"):
         init = tf.global_variables_initializer()
@@ -125,8 +142,8 @@ class SCN():
         merged = tf.summary.merge_all()
         with tf.Session() as sess:
             train_writer = tf.summary.FileWriter('SCN_Graph', sess.graph)
-            history, history_len = self.train_data_context, self.train_data_context_len
             labels = self.train_labels
+            history, history_len = self.train_data_context, self.train_data_context_len
             response, response_len = self.train_data_response, self.train_data_response_len
             # actions, actions_len = np.array(self.train_data['response']), np.array(self.train_data['response_len'])
             # actions = np.array(pad_sequences(actions, padding='post', maxlen=self.max_sentence_len))
@@ -138,6 +155,9 @@ class SCN():
                 saver.restore(sess, previous_modelpath)
             low = 0
             epoch = 1
+            indices_10, indices_100 = self.create_indices(data_length=len(self.valid_data_context),
+                                                          shuffle=True
+                                                          )  # valid indices
             print('\nshuffle train data')
             idx = np.array([i for i in range(len(history))])
             np.random.shuffle(idx)
@@ -153,47 +173,85 @@ class SCN():
                 _, summary = sess.run([self.train_op, merged], feed_dict=feed_dict)
                 train_writer.add_summary(summary, (epoch - 1) * history.shape[0]//self.batch_size + low)
                 low += curr_batch_size
-                if low % 100000 == 0:
+                if low % 10000 == 0:
                     print("epoch: {} iter: {} train_loss: {:g}".format(epoch, low, sess.run(self.total_loss, feed_dict=feed_dict)))
                 if low % self.validation_step == 0:
                     print("Validation:")
-                    self.evaluate(sess)
-                    print("Test:")
-                    self.test(sess)
+                    self.evaluate_from_n_utterances(sess, n_utt=100, indices=indices_100)
+                    self.evaluate_from_n_utterances(sess, n_utt=10, indices=indices_10)
+                    # print("Test:")
+                    # self.test(sess)
                 if low >= history.shape[0]:
                     low = 0
                     saver.save(sess, "model/model.{0}".format(epoch))
                     print(sess.run(self.total_loss, feed_dict=feed_dict))
-                    print('\nepoch={i}'.format(i=epoch))
                     epoch += 1
 
+                    print('\nepoch={i}'.format(i=epoch))
                     print('reshuffle train data')
                     idx = np.array([i for i in range(len(history))])
                     np.random.shuffle(idx)
 
 
-    def evaluate(self, sess):
+    # def evaluate(self, sess):
+    #     self.all_candidate_scores = []
+    #     history, history_len = self.valid_data_context, self.valid_data_context_len
+    #     response, response_len = self.valid_data_response, self.valid_data_response_len
+    #     low = 0
+    #     while True:
+    #         feed_dict = {self.utterance_ph: history[low:low + self.valid_batch_size],
+    #                      self.all_utterance_len_ph: history_len[low:low + self.valid_batch_size],
+    #                      self.response_ph: response[low:low + self.valid_batch_size],
+    #                      self.response_len_ph: response_len[low:low + self.valid_batch_size]
+    #                      }
+    #         candidate_scores = sess.run(self.y_pred, feed_dict=feed_dict)
+    #         self.all_candidate_scores.append(candidate_scores[:, 1])
+    #         low = low + self.valid_batch_size
+    #         if low >= history.shape[0]:
+    #             break
+    #     all_candidate_scores = np.concatenate(self.all_candidate_scores, axis=0)
+    #
+    #     # dim1 = 50000
+    #     # dim2 = 10
+    #     # recalls = [1, 2, 5]
+    #     dim1 = 5000
+    #     dim2 = 100
+    #     recalls = [1, 2, 5, 10, 50]
+    #     y = np.array(all_candidate_scores).reshape(dim1, dim2)
+    #     y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
+    #     for n in recalls:
+    #         print('Recall @ ({}, {}): {:g}'.format(n, dim2, self.evaluate_recall(y, n)))
+
+    def evaluate_from_n_utterances(self, sess, n_utt, indices):
         self.all_candidate_scores = []
         history, history_len = self.valid_data_context, self.valid_data_context_len
         response, response_len = self.valid_data_response, self.valid_data_response_len
         low = 0
         while True:
-            feed_dict = {self.utterance_ph: history[low:low + self.valid_batch_size],
-                         self.all_utterance_len_ph: history_len[low:low + self.valid_batch_size],
-                         self.response_ph: response[low:low + self.valid_batch_size],
-                         self.response_len_ph: response_len[low:low + self.valid_batch_size]
+            feed_dict = {self.utterance_ph: history[indices[low:low + self.valid_batch_size]],
+                         self.all_utterance_len_ph: history_len[indices[low:low + self.valid_batch_size]],
+                         self.response_ph: response[indices[low:low + self.valid_batch_size]],
+                         self.response_len_ph: response_len[indices[low:low + self.valid_batch_size]]
                          }
             candidate_scores = sess.run(self.y_pred, feed_dict=feed_dict)
             self.all_candidate_scores.append(candidate_scores[:, 1])
             low = low + self.valid_batch_size
-            if low >= history.shape[0]:
+            if low >= len(indices):
                 break
         all_candidate_scores = np.concatenate(self.all_candidate_scores, axis=0)
-        dim1 = 50000
+
+        # dim1 = 50000
         # dim2 = 10
-        dim2 = 100
         # recalls = [1, 2, 5]
-        recalls = [1, 2, 5, 10, 50]
+        dim1 = dim2 = recalls = None
+        if n_utt == 10:
+            dim1 = 5000
+            dim2 = 10
+            recalls = [1, 2, 5]
+        elif n_utt == 100:
+            dim1 = 5000
+            dim2 = 100
+            recalls = [1, 2, 5, 10, 50]
         y = np.array(all_candidate_scores).reshape(dim1, dim2)
         y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
         for n in recalls:
