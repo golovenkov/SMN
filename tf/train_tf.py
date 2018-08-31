@@ -1,28 +1,34 @@
 import argparse
 import numpy as np
+
 np.random.seed(42)
 
 import joblib
 import tensorflow as tf
+
 tf.set_random_seed(42)
+
 
 class SCN():
     def __init__(self,
-                 embedding_matrix,
-                 train_data_context,
-                 train_data_context_len,
-                 train_data_response,
-                 train_data_response_len,
-                 valid_data_context,
-                 valid_data_context_len,
-                 valid_data_response,
-                 valid_data_response_len,
-                 test_data_context,
-                 test_data_context_len,
-                 test_data_response,
-                 test_data_response_len,
-                 train_labels,
+                 embedding_matrix=None,
+                 train_data_context=None,
+                 train_data_context_len=None,
+                 train_data_response=None,
+                 train_data_response_len=None,
+                 valid_data_context=None,
+                 valid_data_context_len=None,
+                 valid_data_response=None,
+                 valid_data_response_len=None,
+                 test_data_context=None,
+                 test_data_context_len=None,
+                 test_data_response=None,
+                 test_data_response_len=None,
+                 train_labels=None,
                  num_words=200000,
+                 batch_size=500,
+                 valid_batch_size=2000,
+                 version=1
                  ):
         self.max_num_utterance = 10
         self.negative_samples = 1
@@ -30,12 +36,11 @@ class SCN():
         self.word_embedding_size = 200
         self.rnn_units = 200
         # self.total_words = 434511
-        self.total_words = num_words+1
-        self.batch_size = 200
-        self.valid_batch_size = 2000
-        # self.validation_step = 500000    # for Ubuntu v1
-        self.validation_step = 100000    # for Ubuntu v3
+        self.total_words = num_words + 1
+        self.batch_size = batch_size
+        self.valid_batch_size = valid_batch_size
 
+        self.version = version
         self.embedding_matrix = embedding_matrix
 
         self.train_data_context = train_data_context
@@ -48,12 +53,14 @@ class SCN():
         self.valid_data_response = valid_data_response
         self.valid_data_response_len = valid_data_response_len
 
+        # initialize test data if it exists
         self.test_data_context = test_data_context
         self.test_data_context_len = test_data_context_len
         self.test_data_response = test_data_response
         self.test_data_response_len = test_data_response_len
 
         self.train_labels = train_labels
+        self.validation_step = len(self.train_data_context) // 2
 
     def BuildModel(self):
         self.utterance_ph = tf.placeholder(tf.int32, shape=(None, self.max_num_utterance, self.max_sentence_len))
@@ -63,7 +70,7 @@ class SCN():
         self.response_len_ph = tf.placeholder(tf.int32, shape=(None,))
         self.all_utterance_len_ph = tf.placeholder(tf.int32, shape=(None, self.max_num_utterance))
         word_embeddings = tf.get_variable('word_embeddings_v', shape=(self.total_words,self.
-                                                                      word_embedding_size), dtype=tf.float32, trainable=False)
+                                                                      word_embedding_size), dtype=tf.float32, trainable=True)
         self.embedding_init = word_embeddings.assign(self.embedding_ph)
         all_utterance_embeddings = tf.nn.embedding_lookup(word_embeddings, self.utterance_ph)
         response_embeddings = tf.nn.embedding_lookup(word_embeddings, self.response_ph)
@@ -116,6 +123,13 @@ class SCN():
         optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
         self.train_op = optimizer.minimize(self.total_loss)
 
+    def restore_from_epoch(self, epoch_n):
+        saver = tf.train.Saver()
+        sess = tf.Session()
+
+        saver.restore(sess=sess, save_path="model/model.{}".format(epoch_n))
+        return sess
+
     def create_indices(self, data_length, shuffle=True):
         indices_10 = []
         indices_100 = []
@@ -128,9 +142,9 @@ class SCN():
             if shuffle:
                 np.random.shuffle(shuffled_indices)
             indices_10.append(idx)
-            indices_10.extend([i + shift * epoch for i in shuffled_indices[:9]])   # shuffle for r10@k
+            indices_10.extend([i + shift * epoch for i in shuffled_indices[:9]])  # shuffle for r10@k
             indices_100.append(idx)
-            indices_100.extend([i + shift * epoch for i in indices])          # do not shuffle for r100@k
+            indices_100.extend([i + shift * epoch for i in indices])  # do not shuffle for r100@k
             idx += shift
             epoch += 1
 
@@ -164,23 +178,32 @@ class SCN():
             while epoch <= 30:
                 curr_batch_size = min(low + self.batch_size, history.shape[0]) - low
                 feed_dict = {
-                        self.utterance_ph: history[idx[low:low + curr_batch_size]],
-                        self.all_utterance_len_ph: history_len[idx[low:low + curr_batch_size]],
-                        self.response_ph: response[idx[low:low + curr_batch_size]],
-                        self.response_len_ph: response_len[idx[low:low + curr_batch_size]],
-                        self.y_true: labels[idx[low: low + curr_batch_size]]
-                        }
+                    self.utterance_ph: history[idx[low:low + curr_batch_size]],
+                    self.all_utterance_len_ph: history_len[idx[low:low + curr_batch_size]],
+                    self.response_ph: response[idx[low:low + curr_batch_size]],
+                    self.response_len_ph: response_len[idx[low:low + curr_batch_size]],
+                    self.y_true: labels[idx[low: low + curr_batch_size]]
+                }
                 _, summary = sess.run([self.train_op, merged], feed_dict=feed_dict)
-                train_writer.add_summary(summary, (epoch - 1) * history.shape[0]//self.batch_size + low)
+                train_writer.add_summary(summary, (epoch - 1) * history.shape[0] // self.batch_size + low)
                 low += curr_batch_size
-                if low % 10000 == 0:
+                if low % (len(idx)//10) == 0:
                     print("epoch: {} iter: {} train_loss: {:g}".format(epoch, low, sess.run(self.total_loss, feed_dict=feed_dict)))
                 if low % self.validation_step == 0:
                     print("Validation:")
-                    self.evaluate_from_n_utterances(sess, n_utt=100, indices=indices_100)
-                    self.evaluate_from_n_utterances(sess, n_utt=10, indices=indices_10)
-                    # print("Test:")
-                    # self.test(sess)
+                    if self.version == 1:
+                        self.evaluate_from_n_utterances(sess)
+                        print("Test:")
+                        self.test(sess)
+                    elif self.version == 2:
+                        self.evaluate_from_n_utterances(sess)
+                        print('Test:')
+                        self.test(sess)
+                    elif self.version == 3:
+                        # only evaluate for v3 because we don't have test data yet!
+                        self.evaluate_from_n_utterances(sess, n_utt=100, indices=indices_100)
+                        self.evaluate_from_n_utterances(sess, n_utt=10, indices=indices_10)
+
                 if low >= history.shape[0]:
                     low = 0
                     saver.save(sess, "model/model.{0}".format(epoch))
@@ -192,41 +215,17 @@ class SCN():
                     idx = np.array([i for i in range(len(history))])
                     np.random.shuffle(idx)
 
+    def get_dims_and_recall(self, length, k=10):
+        return length//k, k, [1, 2, 5] if k == 10 else [1, 2, 5, 10, 50]
 
-    # def evaluate(self, sess):
-    #     self.all_candidate_scores = []
-    #     history, history_len = self.valid_data_context, self.valid_data_context_len
-    #     response, response_len = self.valid_data_response, self.valid_data_response_len
-    #     low = 0
-    #     while True:
-    #         feed_dict = {self.utterance_ph: history[low:low + self.valid_batch_size],
-    #                      self.all_utterance_len_ph: history_len[low:low + self.valid_batch_size],
-    #                      self.response_ph: response[low:low + self.valid_batch_size],
-    #                      self.response_len_ph: response_len[low:low + self.valid_batch_size]
-    #                      }
-    #         candidate_scores = sess.run(self.y_pred, feed_dict=feed_dict)
-    #         self.all_candidate_scores.append(candidate_scores[:, 1])
-    #         low = low + self.valid_batch_size
-    #         if low >= history.shape[0]:
-    #             break
-    #     all_candidate_scores = np.concatenate(self.all_candidate_scores, axis=0)
-    #
-    #     # dim1 = 50000
-    #     # dim2 = 10
-    #     # recalls = [1, 2, 5]
-    #     dim1 = 5000
-    #     dim2 = 100
-    #     recalls = [1, 2, 5, 10, 50]
-    #     y = np.array(all_candidate_scores).reshape(dim1, dim2)
-    #     y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
-    #     for n in recalls:
-    #         print('Recall @ ({}, {}): {:g}'.format(n, dim2, self.evaluate_recall(y, n)))
-
-    def evaluate_from_n_utterances(self, sess, n_utt, indices):
+    def evaluate_from_n_utterances(self, sess, n_utt=10, indices=None):
         self.all_candidate_scores = []
         history, history_len = self.valid_data_context, self.valid_data_context_len
         response, response_len = self.valid_data_response, self.valid_data_response_len
         low = 0
+
+        if self.version in [1, 2]:
+            indices = [i for i in range(len(history))]  # no need to shuffle indices r10@k for v1
         while True:
             feed_dict = {self.utterance_ph: history[indices[low:low + self.valid_batch_size]],
                          self.all_utterance_len_ph: history_len[indices[low:low + self.valid_batch_size]],
@@ -240,18 +239,12 @@ class SCN():
                 break
         all_candidate_scores = np.concatenate(self.all_candidate_scores, axis=0)
 
-        # dim1 = 50000
-        # dim2 = 10
-        # recalls = [1, 2, 5]
         dim1 = dim2 = recalls = None
-        if n_utt == 10:
-            dim1 = 5000
-            dim2 = 10
-            recalls = [1, 2, 5]
-        elif n_utt == 100:
-            dim1 = 5000
-            dim2 = 100
-            recalls = [1, 2, 5, 10, 50]
+        if self.version in [1, 2]:
+            dim1, dim2, recalls = self.get_dims_and_recall(len(indices))
+        elif self.version == 3:
+            dim1, dim2, recalls = self.get_dims_and_recall(len(indices), k=n_utt)
+
         y = np.array(all_candidate_scores).reshape(dim1, dim2)
         y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
         for n in recalls:
@@ -274,11 +267,13 @@ class SCN():
             if low >= history.shape[0]:
                 break
         all_candidate_scores = np.concatenate(self.all_candidate_scores, axis=0)
-        dim1 = 50000
-        # dim2 = 10
-        dim2 = 100
-        # recalls = [1, 2, 5]
-        recalls = [1, 2, 5, 10, 50]
+
+        dim1 = dim2 = recalls = None
+        if self.version in [1, 2]:
+            dim1, dim2, recalls = self.get_dims_and_recall(len(history))
+        elif self.version == 3:
+            pass  # no test data for DSTC7 yet!
+
         y = np.array(all_candidate_scores).reshape(dim1, dim2)
         y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
         for n in recalls:
@@ -309,7 +304,8 @@ def main():
     psr.add_argument('--test_data_context', default='test_context.joblib')
     psr.add_argument('--test_data_response', default='test_response.joblib')
     psr.add_argument('--model_name', default='SMN_last')
-    psr.add_argument('--batch_size', default=256, type=int)
+    psr.add_argument('--batch_size', default=500, type=int)
+    psr.add_argument('--version', default=1, type=int)
     args = psr.parse_args()
 
     print('load embedding matrix')
@@ -364,7 +360,9 @@ def main():
                 test_data_response=test_response,
                 test_data_response_len=test_response_len,
 
-                train_labels=labels
+                train_labels=labels,
+                batch_size=args.batch_size,
+                version=args.version
                 )
     print('building model')
     model.BuildModel()

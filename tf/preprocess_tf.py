@@ -8,6 +8,7 @@ from keras.preprocessing.sequence import pad_sequences
 import ijson
 import numpy as np
 import pickle
+import csv
 
 def create_dialog_iter(filename, mode="train", sampling="10-10"):
     """
@@ -84,7 +85,7 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
     Parse the source dataset files and split into context/response/train
 
     multiturn_data - text file to process (for example, train.txt)
-    version        - if the source file is Ubuntu Dialogue Corpus v1 / v2
+    version        - if the source file is Ubuntu Dialogue Corpus v1 / v2 / v3
     mode           - if the source file for train
     sampling       - the type of example sampling for training if more than one a negative sample is provided
     """
@@ -97,7 +98,7 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
                 line = line.replace('_','')
                 parts = line.strip().split('\t')
 
-                lable = int(parts[0])
+                label = int(parts[0])
                 message = ''
                 for i in range(1, len(parts)-1, 1):
                     message += parts[i]
@@ -107,8 +108,36 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
 
                 contexts.append(message)
                 responses.append(response)
-                labels.append(lable)
+                labels.append(label)
     elif version == 2:
+        # TODO: parse csv files for Ubuntu v2
+        with codecs.open(multiturn_data, 'r', 'utf-8') as f:
+            reader = csv.reader(f)
+            ncol = len(next(reader, None))  # skip and count the headers
+            if ncol == 3:  # train
+                for row in tqdm(reader):
+                    # merge sentences in each turn
+                    message = row[0].replace("__eou__", "").replace("__eot__", " _eot_ ")
+                    response = row[1].replace("__eou__", "")
+
+                    label = int(row[2])
+
+                    contexts.append(message)
+                    responses.append(response)
+                    labels.append(label)
+            elif ncol == 11:
+                for row in tqdm(reader):
+                    # merge sentences in each turn
+                    message = row[0].replace("__eou__", "").replace("__eot__", "_eot_")
+
+                    for i in range(1, 11):
+                        response = row[i].replace("__eou__", "")
+                        label = 1 if i == 1 else 0
+
+                        contexts.append(message)
+                        responses.append(response)
+                        labels.append(label)
+    elif version == 3:
         # i = 0
         for samples in tqdm(create_dialog_iter(multiturn_data, mode, sampling)):
             # if i > 100: break
@@ -152,8 +181,8 @@ def preprocess_texts(texts, maxlen, word_index):
         else:
             return word_index['<UNK>']   # return last index, usually <UNK> or mean of all words
 
-    # sequences = tokenizer.texts_to_sequences(texts) TODO: old code
-    sequences = [list(map(word2id, text_to_word_sequence(each_utt, filters="\t\n,", split=" "))) for each_utt in texts]
+    # sequences = [list(map(word2id, text_to_word_sequence(each_utt, filters="\t\n,", split=" "))) for each_utt in texts]
+    sequences = [list(map(word2id, text_to_word_sequence(each_utt))) for each_utt in texts]
     sequences_length = [min(len(sequence), maxlen) for sequence in sequences]
     return pad_sequences(sequences, maxlen=maxlen, padding="post"), sequences_length
 
@@ -199,7 +228,7 @@ def word2vec_embedding(path, num_words, embedding_dim, word_index):
             embedding_matrix[i] = model[word]   # try to find a vector for the given word
         except KeyError:
             not_found_words.append(word)
-            embedding_matrix[i] = np.random.uniform(-0.6, 0.6, embedding_dim)
+            embedding_matrix[i] = np.random.uniform(-0.25, 0.25, embedding_dim)
     embedding_matrix[-1] = np.mean(embedding_matrix[1:num_words], axis=0)               # <UNK> token as mean of all the vectors
     if len(not_found_words) > 0:
         print('Not found embedding vectors for {} words out of {}'.format(len(not_found_words), len(word_index)))
@@ -237,7 +266,7 @@ def glove_embeddings(path='glove.twitter.27B.200d.txt', num_words=200000, embedd
             embedding_matrix[i] = glove_vectors[glove_word_index[word]]
         except KeyError:
             not_found_words.append(word)
-            embedding_matrix[i] = np.random.uniform(-0.6, 0.6, embedding_dim)
+            embedding_matrix[i] = np.random.uniform(-0.25, 0.25, embedding_dim)
     embedding_matrix[-1] = np.mean(embedding_matrix[1:num_words], axis=0)               # <UNK> token as mean of all the vectors
     if len(not_found_words) > 0:
         print('Not found embedding vectors for {} words out of {}'.format(len(not_found_words), len(word_index)))
@@ -251,7 +280,7 @@ def random_embeddings(num_words=200000, embedding_dim=200, word_index=None):
     for word, i in word_index.items():
         if i > num_words:
             continue
-        embedding_matrix[i] = np.random.uniform(-0.6, 0.6, embedding_dim)
+        embedding_matrix[i] = np.random.uniform(-0.25, 0.25, embedding_dim)
     return embedding_matrix
 
 def smn_word2vec_embedding(num_words=200000, embedding_dim=200, word_index=None):
@@ -279,7 +308,7 @@ def smn_word2vec_embedding(num_words=200000, embedding_dim=200, word_index=None)
             embedding_matrix[i] = smn_vectors[smn_word_index[word]]
         except KeyError:
             not_found_words.append(word)
-            embedding_matrix[i] = np.random.uniform(-0.6, 0.6, embedding_dim)
+            embedding_matrix[i] = np.random.uniform(-0.25, 0.25, embedding_dim)
     embedding_matrix[-1] = np.mean(embedding_matrix[1:num_words], axis=0)  # <UNK> token as mean of all the vectors
     if len(not_found_words) > 0:
         print('Not found embedding vectors for {} words out of {}'.format(len(not_found_words), len(word_index)))
@@ -340,18 +369,11 @@ def process_line(s, clean_string=True):
     if clean_string:
         s = clean_str(s)
     tokens = tokenize(s)
-    sent = nltk.pos_tag(tokens)
-    chunks = nltk.ne_chunk(sent, binary=False)
+    # sent = nltk.pos_tag(tokens)
+    # chunks = nltk.ne_chunk(sent, binary=False)
 
-    return [process_token(c,token).lower() for c,token in zip(chunks, tokens)]
-
-# def preprocess_ubuntu_v2(contexts, responses):
-#     prep_contexts = []
-#     prep_responses = []
-#     for context, response in zip(contexts, responses):
-#         prep_contexts.append(" ".join(process_line(context)))
-#         prep_responses.append(" ".join(process_line(response)))
-#     return prep_contexts, prep_responses
+    # return [process_token(c,token).lower() for c,token in zip(chunks, tokens)]
+    return [process_token(None, token).lower() for token in tokens]    # do not use POS tagging
 
 
 def main():
@@ -365,74 +387,93 @@ def main():
     psr.add_argument('--test_data', default='../ubuntu_data/test.txt')
 
     psr.add_argument('--version', default=1, type=int)  # which version of Ubuntu Dataset to use
-    psr.add_argument('--sampling', default='1-1', type=str) # how to create train data for Ubuntu v2
+    psr.add_argument('--sampling', default='1-1', type=str) # how to create train data for Ubuntu v3
     psr.add_argument('--embeddings', default='word2vec') # which embeddings to use
     args = psr.parse_args()
 
     print('load data')
+    train_context = train_response = valid_context = valid_response = None
+    train_labels = valid_labels = test_labels = None
     if args.version == 1:
         train_context, train_response, train_labels = build_multiturn_data("../ubuntu_data/train.txt")
         valid_context, valid_response, valid_labels = build_multiturn_data("../ubuntu_data/valid.txt")
         test_context, test_response, test_labels = build_multiturn_data("../ubuntu_data/test.txt")
-    else:
-        # because we don't have test data for Ubuntu Corpus v2 yet!
+    elif args.version == 2:
+        train_context, train_response, train_labels = build_multiturn_data("../ubuntu_data_v2/train.csv", version=args.version)
+        valid_context, valid_response, valid_labels = build_multiturn_data("../ubuntu_data_v2/valid.csv", version=args.version)
+        test_context, test_response, test_labels = build_multiturn_data("../ubuntu_data_v2/test.csv", version=args.version)
+    elif args.version == 3:
+        # because we don't have test data for DSTC7 Ubuntu Corpus v3 yet!
         # train_context, train_response, train_labels = \
-        #     build_multiturn_data("../ubuntu_data_v2/ubuntu_train_subtask_1.json", args.version, "train", args.sampling)
+        #     build_multiturn_data("../ubuntu_data_v3/ubuntu_train_subtask_1.json", args.version, "train", args.sampling)
         # valid_context, valid_response, valid_labels =\
-        #     build_multiturn_data("../ubuntu_data_v2/ubuntu_dev_subtask_1.json", args.version, "valid", args.sampling)
+        #     build_multiturn_data("../ubuntu_data_v3/ubuntu_dev_subtask_1.json", args.version, "valid", args.sampling)
 
         # or load existing pickled versions!!!
-        # TODO: load train_context, etc.
-        with open('../v2_joblib/prep_train_context.pickle', 'rb') as handle:
+        with open('../v3_joblib/prep_train_context.pickle', 'rb') as handle:
             train_context = pickle.load(handle)
-        with open('../v2_joblib/prep_train_response.pickle', 'rb') as handle:
+        with open('../v3_joblib/prep_train_response.pickle', 'rb') as handle:
             train_response = pickle.load(handle)
-        with open('../v2_joblib/prep_valid_context.pickle', 'rb') as handle:
+        with open('../v3_joblib/prep_valid_context.pickle', 'rb') as handle:
             valid_context = pickle.load(handle)
-        with open('../v2_joblib/prep_valid_response.pickle', 'rb') as handle:
+        with open('../v3_joblib/prep_valid_response.pickle', 'rb') as handle:
             valid_response = pickle.load(handle)
 
     embedding_matrix = None
     tokenizer = None
     # tokenize
+    print('tokenize')
     if args.version == 1:
         # load existing tokenizer for faster load
-        print('tokenize')
-        with open('../tokenizer.pickle', 'rb') as handle:
+        with open('../v1_joblib/v1_tokenizer.pickle', 'rb') as handle:
             print('restoring tokenizer for v1')
             tokenizer = pickle.load(handle)
-        # tokenizer.fit_on_texts(np.append(train_context, train_response)) # TODO: numpy can throw MemoryError here
     elif args.version == 2:
-        with open('../v2_joblib/prep_train_context.pickle', 'wb') as handle:
-            pickle.dump(train_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open('../v2_joblib/prep_train_response.pickle', 'wb') as handle:
-            pickle.dump(train_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open('../v2_joblib/prep_valid_context.pickle', 'wb') as handle:
-            pickle.dump(valid_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open('../v2_joblib/prep_valid_response.pickle', 'wb') as handle:
-            pickle.dump(valid_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        print('tokenize')
-        tokenizer = Tokenizer(filters="\t\n,", split=" ")
+        # TODO: tokenize for v2 and save tokenizer
+        # tokenizer = Tokenizer(filters="\t\n,", split=" ")
+        tokenizer = Tokenizer()
         tokenizer.fit_on_texts(train_context + train_response)
         # save tokenizer
         with open('../v2_joblib/v2_tokenizer.pickle', 'wb') as handle:
             pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    elif args.version == 3:
+        with open('../v3_joblib/prep_train_context.pickle', 'wb') as handle:
+            pickle.dump(train_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('../v3_joblib/prep_train_response.pickle', 'wb') as handle:
+            pickle.dump(train_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('../v3_joblib/prep_valid_context.pickle', 'wb') as handle:
+            pickle.dump(valid_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        with open('../v3_joblib/prep_valid_response.pickle', 'wb') as handle:
+            pickle.dump(valid_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-        # with open('../v2_joblib/v2_tokenizer.pickle', 'rb') as handle:
-        #     print('restoring tokenizer for v2')
-        #     tokenizer = pickle.load(handle)
+        # tokenizer = Tokenizer(filters="\t\n,", split=" ")
+        # tokenizer.fit_on_texts(train_context + train_response)
+        # save tokenizer
+        # with open('../v3_joblib/v3_tokenizer.pickle', 'wb') as handle:
+        #     pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    # fix bug with num_words... keras sucks again
+        with open('../v3_joblib/v3_tokenizer.pickle', 'rb') as handle:
+            print('restoring tokenizer for v3')
+            tokenizer = pickle.load(handle)
+
+    # fix bug with num_words... Keras sucks again
     all_words_count = len(tokenizer.word_index)
     tokenizer.word_index = {e: i for e, i in tokenizer.word_index.items() if
                             i < args.num_words}  # <= because tokenizer is 1 indexed
     tokenizer.word_index['<UNK>'] = args.num_words
     word_index = tokenizer.word_index  # We will use word_index below for creating embedding matrix
     print('Found {} tokens; will use {} unique tokens'.format(all_words_count, len(word_index)))
-    if args.embeddings == 'word2vec':
+
+    # Create embeddigns
+    if args.embeddings == 'word2vec':   # our trained word2vec
         # set the embedding file
-        w2v_path = '../ubuntu_word2vec_200.model' if args.version == 1 else '../v2_ubuntu_word2vec_200.model'
+        w2v_path = ""
+        if args.version == 1:
+            w2v_path = '../ubuntu_word2vec_200.model'
+        elif args.version == 2:
+            pass
+        elif args.version == 3:
+            w2v_path = '../v3_ubuntu_word2vec_200.model'
 
         # create embedding matrix
         print('create embedding matrix')
@@ -443,7 +484,7 @@ def main():
 
     elif args.embeddings == 'glove':
         # create embedding matrix
-        w2v_path = 'glove.twitter.27B.200d.txt'
+        w2v_path = '../glove.twitter.27B.200d.txt'
         embedding_matrix = glove_embeddings(w2v_path,
                                             num_words=args.num_words,
                                             embedding_dim=200,
@@ -472,7 +513,7 @@ def main():
         preprocess_multi_turn_texts(valid_context, args.max_turn, args.maxlen, word_index)
     valid_response, valid_response_len = \
         preprocess_texts(valid_response, args.maxlen, word_index)
-    if args.version == 1:
+    if args.version in [1, 2]:
         # because we don't have test data yet!
         test_context, test_context_len = \
             preprocess_multi_turn_texts(test_context, args.max_turn, args.maxlen, word_index)
@@ -480,7 +521,7 @@ def main():
             preprocess_texts(test_response, args.maxlen, word_index)
 
 
-    # TODO: new code
+    # 5. We should store sentences and sentences length
     train_data_context = {'context': train_context,
                   'context_len': train_context_len}
     train_data_response = {
@@ -493,7 +534,8 @@ def main():
                   'response': valid_response,
                   'response_len': valid_response_len,
                   'labels': valid_labels}
-    if args.version == 1:
+    # In DSTC7 (v3) we don't have test set
+    if args.version in [1, 2]:
         # because we don't have test data yet!
         test_data_context = {'context': test_context,
                      'context_len': test_context_len}
@@ -501,14 +543,6 @@ def main():
                      'response': test_response,
                      'response_len': test_response_len,
                      'labels': test_labels}
-    ########################
-
-    # TODO: old code
-    # train_data = {'context': train_context, 'response': train_response, 'labels': train_labels}
-    # valid_data = {'context': valid_context, 'response': valid_response, 'labels': valid_labels}
-    # if args.version == 1:
-    #     test_data = {'context': test_context, 'response': test_response, 'labels': test_labels}
-    ####################3
 
     print('dump processed data')
     joblib.dump(train_data_context, 'train_context.joblib', protocol=-1, compress=3)
@@ -516,7 +550,7 @@ def main():
 
     joblib.dump(valid_data_context, 'valid_context.joblib', protocol=-1, compress=3)
     joblib.dump(valid_data_response, 'valid_response.joblib', protocol=-1, compress=3)
-    if args.version == 1:
+    if args.version in [1, 2]:
         joblib.dump(test_data_context, 'test_context.joblib', protocol=-1, compress=3)
         joblib.dump(test_data_response, 'test_response.joblib', protocol=-1, compress=3)
 

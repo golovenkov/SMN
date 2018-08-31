@@ -77,7 +77,7 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
     Parse the source dataset files and split into context/response/train
 
     multiturn_data - text file to process (for example, train.txt)
-    version        - if the source file is Ubuntu Dialogue Corpus v1 / v2
+    version        - if the source file is Ubuntu Dialogue Corpus v1 / v3
     mode           - if the source file for train
     sampling       - the type of example sampling for training if more than one a negative sample is provided
     """
@@ -281,7 +281,7 @@ def main():
     psr.add_argument('--test_data', default='./ubuntu_data/test.txt')
 
     psr.add_argument('--version', default=1, type=int)  # which version of Ubuntu Dataset to use
-    psr.add_argument('--sampling', default='1-1', type=str) # how to create train data for Ubuntu v2
+    psr.add_argument('--sampling', default='1-1', type=str) # how to create train data for Ubuntu v3
     psr.add_argument('--embeddings', default='word2vec') # which embeddings to use
     args = psr.parse_args()
 
@@ -291,11 +291,11 @@ def main():
         valid_context, valid_response, valid_labels = build_multiturn_data("./ubuntu_data/valid.txt")
         test_context, test_response, test_labels = build_multiturn_data("./ubuntu_data/test.txt")
     else:
-        # because we don't have test data for Ubuntu Corpus v2 yet!
+        # because we don't have test data for Ubuntu Corpus v3 yet!
         train_context, train_response, train_labels = \
-            build_multiturn_data("ubuntu_data_v2/ubuntu_train_subtask_1.json", args.version, "train", args.sampling)
+            build_multiturn_data("ubuntu_data_v3/ubuntu_train_subtask_1.json", args.version, "train", args.sampling)
         valid_context, valid_response, valid_labels =\
-            build_multiturn_data("ubuntu_data_v2/ubuntu_dev_subtask_1.json", args.version, "valid", args.sampling)
+            build_multiturn_data("ubuntu_data_v3/ubuntu_dev_subtask_1.json", args.version, "valid", args.sampling)
 
     embedding_matrix = None
     tokenizer = None
@@ -309,10 +309,10 @@ def main():
         # tokenizer.fit_on_texts(np.append(train_context, train_response)) # TODO: numpy can throw MemoryError here
     elif args.version == 2:
         # tokenizer = Tokenizer(filters="\t\n,", split=' ')
-        # sentences = Text8Corpus("ubuntu_data_v2/train.txt")
+        # sentences = Text8Corpus("ubuntu_data_v3/train.txt")
         # tokenizer.fit_on_texts(sentences)
-        with open('v2_joblib/v2_tokenizer.pickle', 'rb') as handle:
-            print('restoring tokenizer for v2')
+        with open('v3_joblib/v3_tokenizer.pickle', 'rb') as handle:
+            print('restoring tokenizer for v3')
             tokenizer = pickle.load(handle)
 
     # save for faster access
@@ -328,7 +328,7 @@ def main():
     print('Found {} tokens; will use {} unique tokens'.format(all_words_count, len(word_index)))
     if args.embeddings == 'word2vec':
         # set the embedding file
-        w2v_path = 'ubuntu_word2vec_200.model' if args.version == 1 else 'v2_ubuntu_word2vec_200.model'
+        w2v_path = 'ubuntu_word2vec_200.model' if args.version == 1 else 'v3_ubuntu_word2vec_200.model'
 
         # create embedding matrix
         print('create embedding matrix')
@@ -382,7 +382,7 @@ def main():
         test_data = {'context': test_context, 'response': test_response, 'labels': test_labels}
 
     print('dump')
-    dump_path = "" if args.version == 1 else "v2_joblib/"
+    dump_path = "" if args.version == 1 else "v3_joblib/"
     joblib.dump(train_data, dump_path+'train.joblib', protocol=-1, compress=3)
     joblib.dump(valid_data, dump_path+'valid.joblib', protocol=-1, compress=3)
     if args.version == 1:
