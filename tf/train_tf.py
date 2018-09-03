@@ -27,8 +27,9 @@ class SCN():
                  train_labels=None,
                  num_words=200000,
                  batch_size=500,
-                 valid_batch_size=2000,
-                 version=1
+                 valid_batch_size=200,
+                 version=1,
+                 trainable=False
                  ):
         self.max_num_utterance = 10
         self.negative_samples = 1
@@ -62,6 +63,8 @@ class SCN():
         self.train_labels = train_labels
         self.validation_step = len(self.train_data_context) // 2
 
+        self.trainable = trainable
+
     def BuildModel(self):
         self.utterance_ph = tf.placeholder(tf.int32, shape=(None, self.max_num_utterance, self.max_sentence_len))
         self.response_ph = tf.placeholder(tf.int32, shape=(None, self.max_sentence_len))
@@ -70,7 +73,7 @@ class SCN():
         self.response_len_ph = tf.placeholder(tf.int32, shape=(None,))
         self.all_utterance_len_ph = tf.placeholder(tf.int32, shape=(None, self.max_num_utterance))
         word_embeddings = tf.get_variable('word_embeddings_v', shape=(self.total_words,self.
-                                                                      word_embedding_size), dtype=tf.float32, trainable=True)
+                                                                      word_embedding_size), dtype=tf.float32, trainable=self.trainable)
         self.embedding_init = word_embeddings.assign(self.embedding_ph)
         all_utterance_embeddings = tf.nn.embedding_lookup(word_embeddings, self.utterance_ph)
         response_embeddings = tf.nn.embedding_lookup(word_embeddings, self.response_ph)
@@ -175,7 +178,7 @@ class SCN():
             print('\nshuffle train data')
             idx = np.array([i for i in range(len(history))])
             np.random.shuffle(idx)
-            while epoch <= 30:
+            while epoch <= 15:
                 curr_batch_size = min(low + self.batch_size, history.shape[0]) - low
                 feed_dict = {
                     self.utterance_ph: history[idx[low:low + curr_batch_size]],
@@ -362,7 +365,9 @@ def main():
 
                 train_labels=labels,
                 batch_size=args.batch_size,
-                version=args.version
+                version=args.version,
+
+                trainable=False
                 )
     print('building model')
     model.BuildModel()

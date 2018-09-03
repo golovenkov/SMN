@@ -1,7 +1,10 @@
 import argparse
 from gensim.models.word2vec import Word2Vec, Text8Corpus
-from gensim.models.word2vec import LineSentence
+from keras.preprocessing.text import Tokenizer, text_to_word_sequence
 import ijson
+import pickle
+import tqdm
+import codecs
 
 def create_dialog_iter(filename):
     """
@@ -37,17 +40,37 @@ def main():
     psr = argparse.ArgumentParser()
     psr.add_argument('-d', '--dim', default=200, type=int)
     psr.add_argument('-p', '--path', default='ubuntu_data/train.txt')
-    psr.add_argument('-v', '--version', default='1')
+    psr.add_argument('-v', '--version', default=1, type=int)
     args = psr.parse_args()
-    if args.version == '1':
+    if args.version == 1:
         # Parse and tokenize Ubuntu Corpus v1
         sentences = Text8Corpus(args.path)
         print('training')
         model = Word2Vec(sentences, size=args.dim, window=5, min_count=0, workers=8)
         model.save('ubuntu_word2vec_' + str(args.dim) + '.model')
         print('saved.')
-    else:
-        # Parse and tokenize Ubuntu Corpus v2
+    elif args.version == 2:
+        # read context and response
+        print('reading')
+        filters = "\t\n,"
+        sentences = []
+        # tokenizer = None
+        # with open('v2_joblib/v2_tokenizer.pickle', 'rb') as handle:
+        #     tokenizer = pickle.load(handle)
+        with codecs.open('tf/preptrain', 'r', 'utf-8') as text_f:
+            for line in text_f:
+                # if len(line) > 2000: break
+                line = line.replace('_eot_', '')
+                sentences.append(text_to_word_sequence(line, filters=filters, split=" "))
+        # print(sentences)
+        print('training')
+        model = Word2Vec(sentences, iter=30, size=args.dim, sg=1, window=10, min_count=1, workers=8)
+        model.save('v2_ubuntu_word2vec_' + str(args.dim) + '_min_count1_iter30_window_10_sg_1.model')
+        print('saved')
+
+    elif args.version == 3:
+        # TODO: outdated!
+        # Parse and tokenize Ubuntu Corpus v3
         print('reading json and dump sentences')
         fout_filename = "ubuntu_data_v2/train.txt"
         with open(fout_filename, 'wt') as fout:
@@ -57,7 +80,7 @@ def main():
         sentences = Text8Corpus(fout_filename)
         print('training')
         model = Word2Vec(sentences, size=args.dim, window=5, min_count=0, workers=8)
-        model.save('v2_ubuntu_word2vec_' + str(args.dim) + '.model')
+        model.save('v3_ubuntu_word2vec_' + str(args.dim) + '.model')
         print('saved.')
 
 

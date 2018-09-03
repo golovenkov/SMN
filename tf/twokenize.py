@@ -9,6 +9,17 @@ statistical learning with in-the-loop human evaluation :)
 
 __author__="brendan o'connor (anyall.org)"
 
+def is_url(s):
+  """
+  Check token for domain name / ip address / URL
+  :param s: input token, str
+  :return: if the token is a URL, boolean
+  """
+  return s.startswith('http:') or s.startswith('https:') or s.startswith('ftp:') \
+or s.startswith('ftps:') or s.startswith('smb:') \
+or re.match('^([A-Za-z0-9]\.|[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\.){1,}[A-Za-z]{2,6}$', s) \
+or re.match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$', s)
+
 import re,sys
 from emoticons import *
 mycompile = lambda pat:  re.compile(pat,  re.UNICODE)
@@ -118,11 +129,6 @@ def align(toks, orig):
 
 class AlignmentFailed(Exception): pass
 
-# def unicodify(s, encoding='utf8', *args):
-#   if isinstance(s,unicode): return s
-#   if isinstance(s,str): return s.decode(encoding, *args)
-#   return unicode(s)
-
 def tokenize(tweet):
   # text = unicodify(tweet)
   text = squeeze_whitespace(tweet)
@@ -162,7 +168,11 @@ def simple_tokenize(text):
     res.append(bads[i])
   res += goods[-1]
 
-  res = post_process(res)
+  # res = post_process(res)  # no need
+
+  # split tokens like 'webbrowser/mailer/help'. 'debian/main'
+  res = post_process_slashes(res)
+  res = post_process_strip(res)
   return res
 
 AposS = mycompile(r"(\S+)('s)$")
@@ -176,6 +186,38 @@ def post_process(pre_toks):
       post_toks += m.groups()
     else:
       post_toks.append( tok )
+  return post_toks
+
+InnerSlashes = mycompile(r"([^/]+)(?:/)")
+InnerSlashes2 = mycompile(r"([^/]+)(?:/)?")
+
+Split = mycompile (r"([^\[\])(=<>\\\.*:@/-]+)([\[\])(=<>\\\.*:@/-]+)")
+Split2 = mycompile(r"([^\[\])(=<>\\\.*:@/-]+)")
+
+def post_process_slashes(pre_toks):
+  post_toks = []
+  for tok in pre_toks:
+    # m = InnerSlashes.search(tok)
+    m = Split.search(tok)
+    if m and not is_url(tok):       # don't process URLs
+      # post_toks.extend(InnerSlashes2.findall(tok))
+      post_toks.extend(Split2.findall(tok))
+    else:
+      post_toks.append(tok)
+  return post_toks
+
+def post_process_strip(pre_toks):
+  post_toks = []
+  to_remove_tuple = ('=', '\'', '!', '*', '-', ')', '(', '#', '?', '+',
+                     '~', '<', '>', '}', '{', '$', '\\', '^', '.', ':', ';', '@', '"', '|', ']', '[')
+  for tok in pre_toks:
+    tok_ = tok
+    for i in range(10):
+        if tok.startswith(to_remove_tuple):
+          tok_ = tok_[1:]
+        if tok.endswith(to_remove_tuple):
+          tok_ = tok_[:-1]
+    post_toks.append(tok_)
   return post_toks
 
 WS_RE = mycompile(r'\s+')
