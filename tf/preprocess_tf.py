@@ -111,14 +111,13 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
                 contexts.append(message)
                 responses.append(response)
                 labels.append(label)
-                print(message)
                 # exit()
     elif version == 2:
         # TODO: parse csv files for Ubuntu v2
         df = pd.read_csv(multiturn_data)
         if len(df.columns) == 3:  # train
             for index, row in tqdm(df.iterrows()):
-                # if index > 1000: break                   # TODO: remove
+                # if index > 3000: break                  # TODO: remove
 
                 # merge sentences in each turn
                 message = row.Context.replace("__eou__", "")
@@ -130,7 +129,7 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
                 labels.append(label)
         elif len(df.columns) == 11:
             for index, row in tqdm(df.iterrows()):
-                # if index > 1000: break  # TODO: remove
+                # if index > 3000: break  # TODO: remove
 
                 # merge sentences in each turn
                 message = row[0].replace("__eou__", "")
@@ -179,6 +178,15 @@ def word2id(c):
 # def tokenize_utterance(utt):
 #     return list(map(word2id, text_to_word_sequence(remove_stop_words(utt), split=" ")))
 
+def pad_words(X, maxlen):
+    new_seq = []
+    for i in range(maxlen):
+        try:
+            new_seq.append(X[i])
+        except:
+            new_seq.append("")   # PAD with an empty string
+    return new_seq
+
 def preprocess_texts(texts, maxlen, word_index, stop_words=None):
     """ Tokenize and zero-pad the sentence.
 
@@ -197,14 +205,15 @@ def preprocess_texts(texts, maxlen, word_index, stop_words=None):
     Note: if the length of the sequence is less than maxlen setting the length equal to maxlen
     """
 
-    # sequences = [list(map(word2id, text_to_word_sequence(each_utt, split=" "))) for each_utt in texts]
-    sequences = []
-    for each_utt in texts:
-        sequence = np.array(list(map(word2id, text_to_word_sequence(each_utt, filters=filters, split=" "))))
-        sequence = sequence[sequence != 0]   # filter zeros
-        sequences.append(sequence)
+    sequences = [list(map(word2id, text_to_word_sequence(each_utt, filters=filters, split=" "))) for each_utt in texts]
+    word_sequences = [pad_words(text_to_word_sequence(each_utt, filters=filters, split=" "), maxlen) for each_utt in texts]
+    # sequences = []
+    # for each_utt in texts:
+    #     sequence = np.array(list(map(word2id, text_to_word_sequence(each_utt, filters=filters, split=" "))))
+    #     sequence = sequence[sequence != 0]   # filter zeros
+    #     sequences.append(sequence)
     sequences_length = [min(len(sequence), maxlen) for sequence in sequences]
-    return pad_sequences(sequences, maxlen=maxlen, padding="post"), sequences_length
+    return pad_sequences(sequences, maxlen=maxlen, padding="post"), sequences_length, word_sequences
 
 
 def preprocess_multi_turn_texts(context, max_turn, maxlen, word_index, stop_words=None):
@@ -220,11 +229,13 @@ def preprocess_multi_turn_texts(context, max_turn, maxlen, word_index, stop_word
     print('Tokenize and pad the sentences')
     tokenized_multi_turn_texts = []
     sequences_length = []
+    all_padded_word_sequences = []
     for i in tqdm(range(len(multi_turn_texts))):
-        tokenized_sentences, tokenized_sentences_lengths = preprocess_texts(multi_turn_texts[i], maxlen, word_index, stop_words)
+        tokenized_sentences, tokenized_sentences_lengths, padded_word_sequences = preprocess_texts(multi_turn_texts[i], maxlen, word_index, stop_words)
         tokenized_multi_turn_texts.append(tokenized_sentences)
         sequences_length.append(tokenized_sentences_lengths)
-    return tokenized_multi_turn_texts, sequences_length
+        all_padded_word_sequences.append(padded_word_sequences)
+    return tokenized_multi_turn_texts, sequences_length, all_padded_word_sequences
 
 def word2vec_embedding(path, num_words, embedding_dim, word_index):
     """
@@ -340,7 +351,7 @@ from twokenize import tokenize
 import nltk
 def is_number(s):
   try:
-    float(s)
+    int(s)
     return True
   except ValueError:
     return False
@@ -381,22 +392,27 @@ def remove_punctuation(string):
         string = re.sub(r"(?:\s|^);(?:\s|$)", " ", string)
         string = re.sub(r"(?:\s|^)](?:\s|$)", " ", string)
         string = re.sub(r"(?:\s|^)\[(?:\s|$)", " ", string)
+        string = re.sub(r"(?:\s|^)\](?:\s|$)", " ", string)
         string = re.sub(r"(?:\s|^)}(?:\s|$)", " ", string)
         string = re.sub(r"(?:\s|^){(?:\s|$)", " ", string)
         string = re.sub(r"(?:\s|^)`(?:\s|$)", " ", string)
         string = re.sub(r"(?:\s|^)\?(?:\s|$)", " ", string)
 
-
-        string = re.sub(r"(?:\s|^)'s(?:\s|$)", " ", string)
-        string = re.sub(r"(?:\s|^)'ll(?:\s|$)", " ", string)
-        string = re.sub(r"(?:\s|^)'d(?:\s|$)", " ", string)
-        string = re.sub(r"(?:\s|^)'ve(?:\s|$)", " ", string)
-        string = re.sub(r"(?:\s|^)'re(?:\s|$)", " ", string)
+        string = re.sub(r"(?:\s|^)\((?:\s|$)", " ", string)
+        string = re.sub(r"(?:\s|^)\)(?:\s|$)", " ", string)
+        string = re.sub(r"(?:\s|^)#(?:\s|$)", " ", string)
 
 
-    string = string.replace("__eot__", "%%%%%EOT%%%%%")
-    string = string.replace("_","")
-    string = string.replace("%%%%%EOT%%%%%"," _eot_ ")
+        # string = re.sub(r"(?:\s|^)'s(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)'ll(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)'d(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)'ve(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)'re(?:\s|$)", " ", string)
+
+
+    # string = string.replace("__eot__", "%%%%%EOT%%%%%")
+    # string = string.replace("_","")
+    # string = string.replace("%%%%%EOT%%%%%"," _eot_ ")
 
     return string
 
@@ -440,6 +456,7 @@ def main():
     psr.add_argument('--train_data', default='../ubuntu_data/train.txt')   # path to source data
     psr.add_argument('--valid_data', default='../ubuntu_data/valid.txt')
     psr.add_argument('--test_data', default='../ubuntu_data/test.txt')
+    psr.add_argument('--w2v_path', default='')
 
     psr.add_argument('--version', default=1, type=int)  # which version of Ubuntu Dataset to use
     psr.add_argument('--sampling', default='1-1', type=str) # how to create train data for Ubuntu v3
@@ -457,15 +474,54 @@ def main():
         valid_context, valid_response, valid_labels = build_multiturn_data("../ubuntu_data/valid.txt")
         test_context, test_response, test_labels = build_multiturn_data("../ubuntu_data/test.txt")
     elif args.version == 2:
-        train_context, train_response, train_labels = build_multiturn_data("../ubuntu_data_v2/train.csv", version=args.version)
-        valid_context, valid_response, valid_labels = build_multiturn_data("../ubuntu_data_v2/valid.csv", version=args.version)
-        test_context, test_response, test_labels = build_multiturn_data("../ubuntu_data_v2/test.csv", version=args.version)
+        dumped = True
+        if dumped:
+            # load saved splitted words
+            with open('../v2_joblib/prep_train_context.pickle', 'rb') as h1, \
+                    open('../v2_joblib/prep_train_response.pickle', 'rb') as h2, \
+                    open('../v2_joblib/prep_valid_context.pickle', 'rb') as h3, \
+                    open('../v2_joblib/prep_valid_response.pickle', 'rb') as h4, \
+                    open('../v2_joblib/prep_test_context.pickle', 'rb') as h5, \
+                    open('../v2_joblib/prep_test_response.pickle', 'rb') as h6, \
+                    open('../v2_joblib/prep_train_labels.pickle', 'rb') as h7:
+                train_context, train_response, valid_context, valid_response, test_context, test_response, train_labels = \
+                    pickle.load(h1), pickle.load(h2), pickle.load(h3), pickle.load(h4), pickle.load(h5), pickle.load(
+                        h6), pickle.load(h7)
+        else:
+            train_context, train_response, train_labels = build_multiturn_data("../ubuntu_data_v2/train.csv", version=args.version)
+            valid_context, valid_response, valid_labels = build_multiturn_data("../ubuntu_data_v2/valid.csv", version=args.version)
+            test_context, test_response, test_labels = build_multiturn_data("../ubuntu_data_v2/test.csv", version=args.version)
+            #
+            # dump parsed dataset
+            with open('../v2_joblib/prep_train_context.pickle', 'wb') as handle:
+                 pickle.dump(train_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v2_joblib/prep_train_response.pickle', 'wb') as handle:
+                 pickle.dump(train_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v2_joblib/prep_valid_context.pickle', 'wb') as handle:
+                 pickle.dump(valid_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v2_joblib/prep_valid_response.pickle', 'wb') as handle:
+                 pickle.dump(valid_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v2_joblib/prep_test_context.pickle', 'wb') as handle:
+                pickle.dump(test_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v2_joblib/prep_test_response.pickle', 'wb') as handle:
+                pickle.dump(test_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v2_joblib/prep_train_labels.pickle', 'wb') as handle:
+                pickle.dump(train_labels, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-        with open('preptrain', 'wt') as fout:
-            for line in (train_context+train_response):
-                fout.write("\n" + line)
+            # Debug
+            # with open('preptrain', 'wt') as fout:
+            #     for line in (train_context + train_response):
+            #         fout.write("\n" + line)
+            #
+            # with open('prepvalid', 'wt') as fout:
+            #     for line in (valid_context + valid_response):
+            #         fout.write("\n" + line)
+            #
+            # with open('preptest', 'wt') as fout:
+            #     for line in (test_context + test_response):
+            #         fout.write("\n" + line)
 
-        # exit()
+        # exit("preptrain")
     elif args.version == 3:
         # TODO: outdated!
         # because we don't have test data for DSTC7 Ubuntu Corpus v3 yet!
@@ -483,6 +539,7 @@ def main():
             valid_context = pickle.load(handle)
         with open('../v3_joblib/prep_valid_response.pickle', 'rb') as handle:
             valid_response = pickle.load(handle)
+        # TODO: labels ????
 
     global word_index
     global stop_words
@@ -496,11 +553,18 @@ def main():
             tokenizer = pickle.load(handle)
     elif args.version == 2:
         # TODO: tokenize for v2 and save tokenizer
-        tokenizer = Tokenizer(filters=filters, split=" ")
-        tokenizer.fit_on_texts(train_context + train_response)
-        # save tokenizer
-        with open('../v2_joblib/v2_tokenizer.pickle', 'wb') as handle:
-            pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        tok_dumped = True
+        if tok_dumped:
+            with open('../v2_joblib/v2_tokenizer.pickle', 'rb') as handle:
+                tokenizer = pickle.load(handle)
+        else:
+            tokenizer = Tokenizer(filters=filters, split=" ")
+            tokenizer.fit_on_texts(train_context + train_response)
+            # save tokenizer
+            with open('../v2_joblib/v2_tokenizer.pickle', 'wb') as handle:
+                pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
     elif args.version == 3:
         # TODO: outdated!
         with open('../v3_joblib/prep_train_context.pickle', 'wb') as handle:
@@ -539,7 +603,8 @@ def main():
         if args.version == 1:
             w2v_path = '../ubuntu_word2vec_200.model'
         elif args.version == 2:
-            w2v_path = '../v2_ubuntu_word2vec_200_min_count1.model'  # TODO: replace word2vec model here
+            w2v_path = args.w2v_path
+            # w2v_path = '../v2_ubuntu_word2vec_200_min_count1_iter10_window_15_sg_1.model'  # TODO: replace word2vec model here
         elif args.version == 3:
             w2v_path = '../v3_ubuntu_word2vec_200.model'
 
@@ -582,22 +647,20 @@ def main():
     # print('word_index: {}'.format(word_index.items()))
 
     # 4. Use tokenizer to convert words to integer numbers
-    train_context, train_context_len = \
+    train_context, train_context_len, word_train_context = \
         preprocess_multi_turn_texts(train_context, args.max_turn, args.maxlen, word_index, stop_words=stop_words)
-    train_response, train_response_len = \
+    train_response, train_response_len, word_train_response = \
         preprocess_texts(train_response, args.maxlen, word_index, stop_words=stop_words)
-    valid_context, valid_context_len = \
+    valid_context, valid_context_len, word_valid_context = \
         preprocess_multi_turn_texts(valid_context, args.max_turn, args.maxlen, word_index, stop_words=stop_words)
-    valid_response, valid_response_len = \
+    valid_response, valid_response_len, word_valid_response = \
         preprocess_texts(valid_response, args.maxlen, word_index, stop_words=stop_words)
     if args.version in [1, 2]:
         # because we don't have test data yet!
-        test_context, test_context_len = \
+        test_context, test_context_len, word_test_context = \
             preprocess_multi_turn_texts(test_context, args.max_turn, args.maxlen, word_index, stop_words=stop_words)
-        test_response, test_response_len = \
+        test_response, test_response_len, word_test_response = \
             preprocess_texts(test_response, args.maxlen, word_index, stop_words=stop_words)
-
-    # exit("head preptrain")
 
     # 5. We should store sentences and sentences length
     train_data_context = {'context': train_context,
@@ -622,6 +685,12 @@ def main():
                      'response_len': test_response_len,
                      'labels': test_labels}
 
+    # save raw words
+    # word_train_data = {'context': word_train_context, 'response': word_train_response }
+    # word_valid_data = {'context': word_valid_context, 'response': word_valid_response}
+    # word_test_data = {'context': word_test_context, 'response': word_test_response}
+
+
     print('dump processed data')
     joblib.dump(train_data_context, 'train_context.joblib', protocol=-1, compress=3)
     joblib.dump(train_data_response, 'train_response.joblib', protocol=-1, compress=3)
@@ -631,6 +700,11 @@ def main():
     if args.version in [1, 2]:
         joblib.dump(test_data_context, 'test_context.joblib', protocol=-1, compress=3)
         joblib.dump(test_data_response, 'test_response.joblib', protocol=-1, compress=3)
+
+    # save raw words for ELMo
+    # joblib.dump(word_train_data, 'word_train_context.joblib', protocol=-1, compress=3)
+    # joblib.dump(word_valid_data, 'word_valid_context.joblib', protocol=-1, compress=3)
+    # joblib.dump(word_test_data, 'word_test_context.joblib', protocol=-1, compress=3)
 
     print('dump embedding matrix')
     joblib.dump(embedding_matrix, 'embedding_matrix.joblib', protocol=-1, compress=3)

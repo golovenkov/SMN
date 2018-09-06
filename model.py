@@ -103,16 +103,16 @@ def build_SMN(max_turn, maxlen, word_dim, sent_dim, last_dim, num_words, embeddi
 
     embedding_layer = Embedding(num_words+1,
                                 word_dim,
-                                # weights=[embedding_matrix],   # weights initialization does not work as it should!..
+                                weights=[embedding_matrix],   # weights initialization does not work as it should!..
                                 input_length=maxlen,
                                 trainable=True,
                                 )
     sentence2vec = GRU(sent_dim, return_sequences=True)
 
     context_word_embedding = TimeDistributed(embedding_layer)(context_input)
-    # context_word_embedding = Lambda(lambda x: K.stack(x, axis=1))([embedding_layer(Lambda(lambda x: x[:, turn])(context_input)) for turn in range(max_turn)])
     response_word_embedding = embedding_layer(response_input)
 
+    # context_word_embedding = Lambda(lambda x: K.stack(x, axis=1))([embedding_layer(Lambda(lambda x: x[:, turn])(context_input)) for turn in range(max_turn)])
     # embedding_layer.trainable = False  # We need to set the param after TimeDistributed is applied
 
     context_sent_embedding = TimeDistributed(sentence2vec)(context_word_embedding)

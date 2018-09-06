@@ -23,3 +23,5 @@ v3_joblib/
 tokenizer.pickle
 ubuntu_data.mul.200d.fullw2v.train
 tf/preptrain
+tf/prepvalid
+tf/preptest

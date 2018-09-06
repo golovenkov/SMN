@@ -20,6 +20,9 @@ or s.startswith('ftps:') or s.startswith('smb:') \
 or re.match('^([A-Za-z0-9]\.|[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\.){1,}[A-Za-z]{2,6}$', s) \
 or re.match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$', s)
 
+def is_version(s):
+  return re.match(r'^([156789][01]?)\.([014]{2})$', s)
+
 import re,sys
 from emoticons import *
 mycompile = lambda pat:  re.compile(pat,  re.UNICODE)
@@ -172,7 +175,7 @@ def simple_tokenize(text):
 
   # split tokens like 'webbrowser/mailer/help'. 'debian/main'
   res = post_process_slashes(res)
-  res = post_process_strip(res)
+  # res = post_process_strip(res)
   return res
 
 AposS = mycompile(r"(\S+)('s)$")
@@ -199,7 +202,7 @@ def post_process_slashes(pre_toks):
   for tok in pre_toks:
     # m = InnerSlashes.search(tok)
     m = Split.search(tok)
-    if m and not is_url(tok):       # don't process URLs
+    if m and not is_url(tok) and not is_version(tok):       # don't process URLs
       # post_toks.extend(InnerSlashes2.findall(tok))
       post_toks.extend(Split2.findall(tok))
     else:

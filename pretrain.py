@@ -60,12 +60,12 @@ def main():
         with codecs.open('tf/preptrain', 'r', 'utf-8') as text_f:
             for line in text_f:
                 # if len(line) > 2000: break
-                line = line.replace('_eot_', '')
+                line = line.replace('__eot__', '')
                 sentences.append(text_to_word_sequence(line, filters=filters, split=" "))
         # print(sentences)
         print('training')
-        model = Word2Vec(sentences, iter=30, size=args.dim, sg=1, window=10, min_count=1, workers=8)
-        model.save('v2_ubuntu_word2vec_' + str(args.dim) + '_min_count1_iter30_window_10_sg_1.model')
+        model = Word2Vec(sentences, iter=5, size=args.dim, sg=1, window=10, min_count=1, workers=8)
+        model.save('v2_ubuntu_word2vec_' + str(args.dim) + '_min_count1_iter5_window_10_sg_1_not_aggressive_tokenization.model')
         print('saved')
 
     elif args.version == 3:
