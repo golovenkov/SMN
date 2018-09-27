@@ -8,7 +8,10 @@ from keras.preprocessing.sequence import pad_sequences
 import ijson
 import numpy as np
 import pickle
-import csv
+from multiprocessing import Pool
+import fastText as Fasttext
+
+NEED_WORDS = False
 
 def create_dialog_iter(filename, mode="train", sampling="10-10"):
     """
@@ -76,7 +79,6 @@ def create_dialog_iter(filename, mode="train", sampling="10-10"):
             # print(len(rows))
             yield rows
 
-from multiprocessing import Pool
 def map_process_line(x):
     return remove_punctuation(" ".join(process_line(x, clean_string=True)))
 
@@ -111,13 +113,12 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
                 contexts.append(message)
                 responses.append(response)
                 labels.append(label)
-                # exit()
     elif version == 2:
         # TODO: parse csv files for Ubuntu v2
         df = pd.read_csv(multiturn_data)
         if len(df.columns) == 3:  # train
             for index, row in tqdm(df.iterrows()):
-                # if index > 3000: break                  # TODO: remove
+                # if index > 1000: break                  # TODO: remove
 
                 # merge sentences in each turn
                 message = row.Context.replace("__eou__", "")
@@ -129,7 +130,7 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
                 labels.append(label)
         elif len(df.columns) == 11:
             for index, row in tqdm(df.iterrows()):
-                # if index > 3000: break  # TODO: remove
+                # if index > 1000: break  # TODO: remove
 
                 # merge sentences in each turn
                 message = row[0].replace("__eou__", "")
@@ -187,7 +188,7 @@ def pad_words(X, maxlen):
             new_seq.append("")   # PAD with an empty string
     return new_seq
 
-def preprocess_texts(texts, maxlen, word_index, stop_words=None):
+def preprocess_texts(texts):
     """ Tokenize and zero-pad the sentence.
 
     For tokenizing is used the 'tokenizer' class instance.
@@ -204,9 +205,13 @@ def preprocess_texts(texts, maxlen, word_index, stop_words=None):
 
     Note: if the length of the sequence is less than maxlen setting the length equal to maxlen
     """
-
+    maxlen = 50
     sequences = [list(map(word2id, text_to_word_sequence(each_utt, filters=filters, split=" "))) for each_utt in texts]
-    word_sequences = [pad_words(text_to_word_sequence(each_utt, filters=filters, split=" "), maxlen) for each_utt in texts]
+    if NEED_WORDS:
+        word_sequences = [pad_words(text_to_word_sequence(each_utt, filters=filters, split=" "), maxlen) for each_utt in texts]
+    else:
+        word_sequences = None
+
     # sequences = []
     # for each_utt in texts:
     #     sequence = np.array(list(map(word2id, text_to_word_sequence(each_utt, filters=filters, split=" "))))
@@ -216,7 +221,7 @@ def preprocess_texts(texts, maxlen, word_index, stop_words=None):
     return pad_sequences(sequences, maxlen=maxlen, padding="post"), sequences_length, word_sequences
 
 
-def preprocess_multi_turn_texts(context, max_turn, maxlen, word_index, stop_words=None):
+def preprocess_multi_turn_texts(context, max_turn):
     print('Trim or pad to max_turn utterances')
     multi_turn_texts = []
     for i in tqdm(range(len(context))):
@@ -227,14 +232,26 @@ def preprocess_multi_turn_texts(context, max_turn, maxlen, word_index, stop_word
             multi_turn_texts[i].extend(tmp)
 
     print('Tokenize and pad the sentences')
+    # tokenized_multi_turn_texts = []
+    # sequences_length = []
+    # all_padded_word_sequences = []
+    # for i in tqdm(range(len(multi_turn_texts))):
+    #     tokenized_sentences, tokenized_sentences_lengths, padded_word_sequences = preprocess_texts(multi_turn_texts[i])
+    #     tokenized_multi_turn_texts.append(tokenized_sentences)
+    #     sequences_length.append(tokenized_sentences_lengths)
+    #     all_padded_word_sequences.append(padded_word_sequences)
+
+    pool = Pool()
+    allinone_tuple = [*pool.map(preprocess_texts, tqdm(multi_turn_texts), chunksize=1000)]
+    pool.terminate()
     tokenized_multi_turn_texts = []
     sequences_length = []
     all_padded_word_sequences = []
-    for i in tqdm(range(len(multi_turn_texts))):
-        tokenized_sentences, tokenized_sentences_lengths, padded_word_sequences = preprocess_texts(multi_turn_texts[i], maxlen, word_index, stop_words)
-        tokenized_multi_turn_texts.append(tokenized_sentences)
-        sequences_length.append(tokenized_sentences_lengths)
-        all_padded_word_sequences.append(padded_word_sequences)
+    for each_tuple in tqdm(allinone_tuple):
+        tokenized_multi_turn_texts.append(each_tuple[0])
+        sequences_length.append(each_tuple[1])
+        all_padded_word_sequences.append(each_tuple[2])
+
     return tokenized_multi_turn_texts, sequences_length, all_padded_word_sequences
 
 def word2vec_embedding(path, num_words, embedding_dim, word_index):
@@ -261,6 +278,33 @@ def word2vec_embedding(path, num_words, embedding_dim, word_index):
             not_found_words.append(word)
             embedding_matrix[i] = np.random.uniform(-0.25, 0.25, embedding_dim)
     embedding_matrix[-1] = np.mean(embedding_matrix[1:num_words], axis=0)               # <UNK> token as mean of all the vectors
+    if len(not_found_words) > 0:
+        print('Not found embedding vectors for {} words out of {}'.format(len(not_found_words), len(word_index)))
+        print(" ".join(not_found_words))
+    return embedding_matrix
+
+def fasttext_embeddings(path, num_words, embedding_dim, word_index):
+    """
+    Create embeddings matrix from the given fastText embeddings using maximum 'num_words'
+    :param path: path to the file
+    :param num_words: maximum number of words from word_index to use
+    :param embedding_dim: dim of embeddings, usually 200
+    :param word_index: hash-map for mapping words to indices
+    :return:
+    """
+    model = Fasttext.load_model(path)
+    num_words = min(num_words, len(word_index))
+    embedding_matrix = np.zeros((num_words + 1, embedding_dim))
+    not_found_words = []
+    for word, i in word_index.items():
+        if i > num_words:
+            continue
+        try:
+            embedding_matrix[i] = model.get_word_vector(word)  # try to find a vector for the given word
+        except KeyError:
+            not_found_words.append(word)
+            embedding_matrix[i] = np.random.uniform(-0.25, 0.25, embedding_dim)
+    embedding_matrix[-1] = np.mean(embedding_matrix[1:num_words], axis=0)  # <UNK> token as mean of all the vectors
     if len(not_found_words) > 0:
         print('Not found embedding vectors for {} words out of {}'.format(len(not_found_words), len(word_index)))
         print(" ".join(not_found_words))
@@ -344,19 +388,11 @@ def smn_word2vec_embedding(num_words=200000, embedding_dim=200, word_index=None)
     if len(not_found_words) > 0:
         print('Not found embedding vectors for {} words out of {}'.format(len(not_found_words), len(word_index)))
         print(" ".join(not_found_words))
-    return embedding_matrix, not_found_words
+    return embedding_matrix
 
 import re, os
 from twokenize import tokenize
-import nltk
-def is_number(s):
-  try:
-    int(s)
-    return True
-  except ValueError:
-    return False
-
-from twokenize import is_url
+from twokenize import is_url, is_number, is_version
 
 def clean_str(string, TREC=False):
     """
@@ -372,6 +408,8 @@ def clean_str(string, TREC=False):
     string = re.sub(r"\'re", " \'re", string)
     string = re.sub(r"\'d", " \'d", string)
     string = re.sub(r"\'ll", " \'ll", string)
+    # string = re.sub(r"%20", " ", string)
+
     # string = re.sub(r"`", " ` ", string)
     # string = re.sub(r",", " , ", string)
     return string.strip()
@@ -402,6 +440,15 @@ def remove_punctuation(string):
         string = re.sub(r"(?:\s|^)\)(?:\s|$)", " ", string)
         string = re.sub(r"(?:\s|^)#(?:\s|$)", " ", string)
 
+        # string = re.sub(r"(?:\s|^)<(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)>(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)-(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)*(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)=(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)+(?:\s|$)", " ", string)
+        # string = re.sub(r"(?:\s|^)|(?:\s|$)", " ", string)
+        #
+        # string = re.sub(r"(?:\s|^)[\[\])(=<>\\.*:;@/_+&~\"'-]{2}(?:\s|$)", " ", string)  # replace '--', '"?'
 
         # string = re.sub(r"(?:\s|^)'s(?:\s|$)", " ", string)
         # string = re.sub(r"(?:\s|^)'ll(?:\s|$)", " ", string)
@@ -411,8 +458,13 @@ def remove_punctuation(string):
 
 
     # string = string.replace("__eot__", "%%%%%EOT%%%%%")
+    # string = string.replace("__eou__", "%%%%%EOU%%%%%")
     # string = string.replace("_","")
     # string = string.replace("%%%%%EOT%%%%%"," _eot_ ")
+    # string = string.replace("%%%%%EOT%%%%%", " _eou_ ")
+
+    string = string.replace("__eot__", " _eot_ ")
+    # string = string.replace("__eou__", " _eou_ ")
 
     return string
 
@@ -461,6 +513,9 @@ def main():
     psr.add_argument('--version', default=1, type=int)  # which version of Ubuntu Dataset to use
     psr.add_argument('--sampling', default='1-1', type=str) # how to create train data for Ubuntu v3
     psr.add_argument('--embeddings', default='word2vec') # which embeddings to use
+
+    psr.add_argument('--for_w2v', default='no')
+    psr.add_argument('--dumped', default='no')
     args = psr.parse_args()
 
     print('load data')
@@ -474,8 +529,7 @@ def main():
         valid_context, valid_response, valid_labels = build_multiturn_data("../ubuntu_data/valid.txt")
         test_context, test_response, test_labels = build_multiturn_data("../ubuntu_data/test.txt")
     elif args.version == 2:
-        dumped = True
-        if dumped:
+        if args.dumped == 'yes':
             # load saved splitted words
             with open('../v2_joblib/prep_train_context.pickle', 'rb') as h1, \
                     open('../v2_joblib/prep_train_response.pickle', 'rb') as h2, \
@@ -509,9 +563,9 @@ def main():
                 pickle.dump(train_labels, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
             # Debug
-            # with open('preptrain', 'wt') as fout:
-            #     for line in (train_context + train_response):
-            #         fout.write("\n" + line)
+            with open('preptrain', 'wt') as fout:
+                for line in (train_context + train_response):
+                    fout.write("\n" + line)
             #
             # with open('prepvalid', 'wt') as fout:
             #     for line in (valid_context + valid_response):
@@ -521,7 +575,6 @@ def main():
             #     for line in (test_context + test_response):
             #         fout.write("\n" + line)
 
-        # exit("preptrain")
     elif args.version == 3:
         # TODO: outdated!
         # because we don't have test data for DSTC7 Ubuntu Corpus v3 yet!
@@ -547,15 +600,22 @@ def main():
     # tokenize
     print('tokenize')
     if args.version == 1:
-        # load existing tokenizer for faster load
-        with open('../v1_joblib/v1_tokenizer.pickle', 'rb') as handle:
-            print('restoring tokenizer for v1')
-            tokenizer = pickle.load(handle)
+        if args.dumped == 'yes':
+            # load existing tokenizer for faster load
+            with open('../v1_joblib/v1_tokenizer.pickle', 'rb') as handle:
+                print('restoring tokenizer for v1')
+                tokenizer = pickle.load(handle)
+        else:
+            # save tokenizer
+            tokenizer = Tokenizer(filters=filters, split=" ")
+            print('fit tokenizer')
+            tokenizer.fit_on_texts(train_context + train_response)
+            with open('../v1_joblib/v1_tokenizer.pickle', 'wb') as handle:
+                pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
     elif args.version == 2:
         # TODO: tokenize for v2 and save tokenizer
-
-        tok_dumped = True
-        if tok_dumped:
+        if args.dumped == 'yes':
             with open('../v2_joblib/v2_tokenizer.pickle', 'rb') as handle:
                 tokenizer = pickle.load(handle)
         else:
@@ -594,6 +654,9 @@ def main():
     word_index = tokenizer.word_index  # We will use word_index below for creating embedding matrix
     print('Found {} tokens; will use {} unique tokens'.format(all_words_count, len(word_index)))
 
+    if args.for_w2v == 'yes':
+        exit('finish, watch preptran')
+
     # Create embeddigns
     embedding_matrix = None
     stop_words = None
@@ -631,36 +694,36 @@ def main():
                                              )
     elif args.embeddings == 'smn_word2vec':
         # use prepared vectors and prepared word_index
-        embedding_matrix, stop_words = smn_word2vec_embedding(
+        embedding_matrix = smn_word2vec_embedding(
             num_words=args.num_words,
             embedding_dim=200,
             word_index=word_index
         )
+    elif args.embeddings == 'fasttext':
+        emb_path = ""
+        if args.version == 1:
+            emb_path = None
+        elif args.version == 2:
+            emb_path = args.w2v_path
+        elif args.version == 3:
+            emb_path = None
 
-    # patch word_index
-    #  n_patched = 0
-    #  for stop_word in stop_words:
-    #      n_patched += 1
-    #      word_index[stop_word] = 0
-    #  print('patched {} tokens from {}'.format(n_patched, len(word_index)))
-
-    # print('word_index: {}'.format(word_index.items()))
+        embedding_matrix = fasttext_embeddings(
+            path=emb_path,
+            num_words=args.num_words,
+            embedding_dim=300,
+            word_index=word_index
+        )
 
     # 4. Use tokenizer to convert words to integer numbers
-    train_context, train_context_len, word_train_context = \
-        preprocess_multi_turn_texts(train_context, args.max_turn, args.maxlen, word_index, stop_words=stop_words)
-    train_response, train_response_len, word_train_response = \
-        preprocess_texts(train_response, args.maxlen, word_index, stop_words=stop_words)
-    valid_context, valid_context_len, word_valid_context = \
-        preprocess_multi_turn_texts(valid_context, args.max_turn, args.maxlen, word_index, stop_words=stop_words)
-    valid_response, valid_response_len, word_valid_response = \
-        preprocess_texts(valid_response, args.maxlen, word_index, stop_words=stop_words)
+    train_context, train_context_len, word_train_context = preprocess_multi_turn_texts(train_context, args.max_turn)
+    train_response, train_response_len, word_train_response = preprocess_texts(train_response)
+    valid_context, valid_context_len, word_valid_context = preprocess_multi_turn_texts(valid_context, args.max_turn)
+    valid_response, valid_response_len, word_valid_response = preprocess_texts(valid_response)
     if args.version in [1, 2]:
         # because we don't have test data yet!
-        test_context, test_context_len, word_test_context = \
-            preprocess_multi_turn_texts(test_context, args.max_turn, args.maxlen, word_index, stop_words=stop_words)
-        test_response, test_response_len, word_test_response = \
-            preprocess_texts(test_response, args.maxlen, word_index, stop_words=stop_words)
+        test_context, test_context_len, word_test_context = preprocess_multi_turn_texts(test_context, args.max_turn)
+        test_response, test_response_len, word_test_response = preprocess_texts(test_response)
 
     # 5. We should store sentences and sentences length
     train_data_context = {'context': train_context,
@@ -685,11 +748,14 @@ def main():
                      'response_len': test_response_len,
                      'labels': test_labels}
 
-    # save raw words
-    # word_train_data = {'context': word_train_context, 'response': word_train_response }
-    # word_valid_data = {'context': word_valid_context, 'response': word_valid_response}
-    # word_test_data = {'context': word_test_context, 'response': word_test_response}
+    print('dump embedding matrix')
+    joblib.dump(embedding_matrix, 'embedding_matrix.joblib', protocol=-1, compress=3)
 
+    if NEED_WORDS:
+        # save raw words
+        word_train_data = {'context': word_train_context, 'response': word_train_response }
+        word_valid_data = {'context': word_valid_context, 'response': word_valid_response}
+        word_test_data = {'context': word_test_context, 'response': word_test_response}
 
     print('dump processed data')
     joblib.dump(train_data_context, 'train_context.joblib', protocol=-1, compress=3)
@@ -701,12 +767,10 @@ def main():
         joblib.dump(test_data_context, 'test_context.joblib', protocol=-1, compress=3)
         joblib.dump(test_data_response, 'test_response.joblib', protocol=-1, compress=3)
 
-    # save raw words for ELMo
-    # joblib.dump(word_train_data, 'word_train_context.joblib', protocol=-1, compress=3)
-    # joblib.dump(word_valid_data, 'word_valid_context.joblib', protocol=-1, compress=3)
-    # joblib.dump(word_test_data, 'word_test_context.joblib', protocol=-1, compress=3)
-
-    print('dump embedding matrix')
-    joblib.dump(embedding_matrix, 'embedding_matrix.joblib', protocol=-1, compress=3)
+    if NEED_WORDS:
+        # save raw words for ELMo
+        joblib.dump(word_train_data, 'word_train_context.joblib', protocol=-1, compress=3)
+        joblib.dump(word_valid_data, 'word_valid_context.joblib', protocol=-1, compress=3)
+        joblib.dump(word_test_data, 'word_test_context.joblib', protocol=-1, compress=3)
 
 if __name__ == '__main__': main()

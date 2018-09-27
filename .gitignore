@@ -25,3 +25,7 @@ ubuntu_data.mul.200d.fullw2v.train
 tf/preptrain
 tf/prepvalid
 tf/preptest
+indexes*
+tf/DAM_Graph
+tf/model_checkpoints_DAM
+tf/v2_tokenizer.pickle

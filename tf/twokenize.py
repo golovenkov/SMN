@@ -21,7 +21,14 @@ or re.match('^([A-Za-z0-9]\.|[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\.){1,}[A-Z
 or re.match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$', s)
 
 def is_version(s):
-  return re.match(r'^([156789][01]?)\.([014]{2})$', s)
+  return re.match(r'^([156789][012]?)\.([014]{2})$', s)
+
+def is_number(s):
+  try:
+    int(s)
+    return True
+  except ValueError:
+    return False
 
 import re,sys
 from emoticons import *
@@ -200,10 +207,8 @@ Split2 = mycompile(r"([^\[\])(=<>\\\.*:@/-]+)")
 def post_process_slashes(pre_toks):
   post_toks = []
   for tok in pre_toks:
-    # m = InnerSlashes.search(tok)
     m = Split.search(tok)
     if m and not is_url(tok) and not is_version(tok):       # don't process URLs
-      # post_toks.extend(InnerSlashes2.findall(tok))
       post_toks.extend(Split2.findall(tok))
     else:
       post_toks.append(tok)
