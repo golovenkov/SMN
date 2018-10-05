@@ -82,7 +82,7 @@ def main():
         # print(sentences)
         print('training')
         model = Word2Vec(sentences, iter=args.iter, size=args.dim, sg=1, window=args.window, min_count=1, workers=8)
-        model_filename = 'v2_ubuntu_word2vec_{}_iter{}_window_{}_sg_1_tokenization_25sept.model'\
+        model_filename = 'v2_ubuntu_word2vec_{}_iter{}_window_{}_sg_1_tokenization_02oct.model'\
             .format(args.dim, args.iter, args.window)
         model.save(model_filename)
         counts = Counter({word: vocab.count for (word, vocab) in model.wv.vocab.items()}); topn = 50
@@ -92,19 +92,28 @@ def main():
         print('saved, {}'.format(model_filename))
 
     elif args.version == 3:
-        # TODO: outdated!
-        # Parse and tokenize Ubuntu Corpus v3
-        print('reading json and dump sentences')
-        fout_filename = "ubuntu_data_v2/train.txt"
-        with open(fout_filename, 'wt') as fout:
-            for sentence in create_dialog_iter(args.path):
-                fout.write(" ".join(sentence))
-        print('creating w2v')
-        sentences = Text8Corpus(fout_filename)
+        filters = "\t\n,"
+        # read context and response
+        print('reading')
+        sentences = []
+        # tokenizer = None
+        # with open('v2_joblib/v2_tokenizer.pickle', 'rb') as handle:
+        #     tokenizer = pickle.load(handle)
+        with codecs.open('tf/preptrain_v3', 'r', 'utf-8') as text_f:
+            for line in text_f:
+                line = line.replace('_eot_', '')
+                sentences.append(text_to_word_sequence(line, filters=filters, split=" "))
+        # print(sentences)
         print('training')
-        model = Word2Vec(sentences, size=args.dim, window=5, min_count=0, workers=8)
-        model.save('v3_ubuntu_word2vec_' + str(args.dim) + '.model')
-        print('saved.')
-
+        model = Word2Vec(sentences, iter=args.iter, size=args.dim, sg=1, window=args.window, min_count=1, workers=8)
+        model_filename = 'v3_ubuntu_word2vec_{}_iter{}_window_{}_sg_1_tokenization_02oct.model' \
+            .format(args.dim, args.iter, args.window)
+        model.save(model_filename)
+        counts = Counter({word: vocab.count for (word, vocab) in model.wv.vocab.items()});
+        topn = 50
+        print('top', topn, 'words, ', counts.most_common(topn))
+        print("most similar to 'x11': {}".format(model.wv.most_similar("x11", topn=15)))
+        print("most similar to 'install': {}".format(model.wv.most_similar("install", topn=15)))
+        print('saved, {}'.format(model_filename))
 
 if __name__ == '__main__': main()

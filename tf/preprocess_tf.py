@@ -9,11 +9,11 @@ import ijson
 import numpy as np
 import pickle
 from multiprocessing import Pool
-import fastText as Fasttext
+# import fastText as Fasttext
 
 NEED_WORDS = False
 
-def create_dialog_iter(filename, mode="train", sampling="10-10"):
+def create_dialog_iter(filename, mode="train", sampling="1-1"):
     """
     Returns an iterator over a JSON file.
     :param filename:
@@ -28,20 +28,20 @@ def create_dialog_iter(filename, mode="train", sampling="10-10"):
             message = ''
             utterances = dialog['messages-so-far']
             for msg in utterances:
-                # message += " ".join(process_line(msg['utterance']))  # process_line
                 message += msg['utterance']
                 message += ' _eot_ '
 
-            # true response
-            # true_response = " ".join(process_line(dialog['options-for-correct-answers'][0]['utterance']))  # process line
-            true_response = dialog['options-for-correct-answers'][0]['utterance']
+            true_response = ""
+            if mode is not "test":
+                true_response = dialog['options-for-correct-answers'][0]['utterance']
 
             fake_responses = []
-            correct_answer = dialog['options-for-correct-answers'][0]
-            target_id = correct_answer['candidate-id']
+            target_id = ""
+            if mode is not "test":
+                correct_answer = dialog['options-for-correct-answers'][0]
+                target_id = correct_answer['candidate-id']
             for i, utterance in enumerate(dialog['options-for-next']):
                 if utterance['candidate-id'] != target_id:
-                    # fake_responses.append(" ".join(process_line(utterance['utterance'])))  # preprocess line
                     fake_responses.append(utterance['utterance'])
 
             true = (message, true_response, 1)
@@ -71,20 +71,22 @@ def create_dialog_iter(filename, mode="train", sampling="10-10"):
                 rows.append(true)
                 for r in fake_responses:
                     rows.append((message, r, 0))
-                # rows.append(true)
-                # for fake_response in np.random.choice(fake_responses, 9):
-                #     rows.append((message, fake_response, 0))
 
+            elif mode == 'test':
+                for r in fake_responses:
+                    rows.append((message, r, 0))
             # need to return [(message, response, label), ...]
-            # print(len(rows))
             yield rows
 
 def map_process_line(x):
-    return remove_punctuation(" ".join(process_line(x, clean_string=True)))
+    line = remove_punctuation(" ".join(process_line(x, clean_string=True)))
+    # if line.strip() == "":
+    #     print("processed into empty str:", x)
+    return line
 
 import pandas as pd
 
-def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-10'):
+def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='1-1'):
     """
     Parse the source dataset files and split into context/response/train
 
@@ -114,7 +116,6 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
                 responses.append(response)
                 labels.append(label)
     elif version == 2:
-        # TODO: parse csv files for Ubuntu v2
         df = pd.read_csv(multiturn_data)
         if len(df.columns) == 3:  # train
             for index, row in tqdm(df.iterrows()):
@@ -130,7 +131,7 @@ def build_multiturn_data(multiturn_data, version=1, mode="train", sampling='10-1
                 labels.append(label)
         elif len(df.columns) == 11:
             for index, row in tqdm(df.iterrows()):
-                # if index > 1000: break  # TODO: remove
+                # if index > 1000: break                  # TODO: remove
 
                 # merge sentences in each turn
                 message = row[0].replace("__eou__", "")
@@ -232,14 +233,6 @@ def preprocess_multi_turn_texts(context, max_turn):
             multi_turn_texts[i].extend(tmp)
 
     print('Tokenize and pad the sentences')
-    # tokenized_multi_turn_texts = []
-    # sequences_length = []
-    # all_padded_word_sequences = []
-    # for i in tqdm(range(len(multi_turn_texts))):
-    #     tokenized_sentences, tokenized_sentences_lengths, padded_word_sequences = preprocess_texts(multi_turn_texts[i])
-    #     tokenized_multi_turn_texts.append(tokenized_sentences)
-    #     sequences_length.append(tokenized_sentences_lengths)
-    #     all_padded_word_sequences.append(padded_word_sequences)
 
     pool = Pool()
     allinone_tuple = [*pool.map(preprocess_texts, tqdm(multi_turn_texts), chunksize=1000)]
@@ -414,6 +407,60 @@ def clean_str(string, TREC=False):
     # string = re.sub(r",", " , ", string)
     return string.strip()
 
+import string as py_string
+
+def clean_str2(input_str):
+    ##########################################
+    # new
+    f = input_str.lower()
+    f = f.replace('`', '\'')
+
+    f = f.replace("won't", "will not") 
+    f = f.replace("can't", "cannot")
+    f = f.replace("i'm", "i am") 
+    f = f.replace(" im ", " i am ") 
+    f = f.replace("'re", " are") 
+    f = f.replace("ain't", "is not")
+    f = f.replace("'ll", " will") 
+    f = f.replace("n't", " not") 
+    f = f.replace("'ve", " have") 
+    f = f.replace("'s", " is")
+    f = f.replace("'d", " would") 
+
+    f = re.sub("ies( |$)", "y ", f)
+    f = re.sub("s( |$)", " ", f)
+    f = re.sub("ing( |$)", " ", f) 
+
+    f = f.replace(" u ", " you ")
+    f = f.replace(" em ", " them ")
+    f = f.replace(" da ", " the ")
+    f = f.replace(" yo ", " you ") 
+    f = f.replace(" ur ", " your ") 
+    f = f.replace(" u r ", " you are ")
+    f = f.replace(" urs ", " yours ") 
+    f = f.replace("y'all", "you all") 
+
+    f = f.replace(" r u ", " are you ")
+    f = f.replace(" r you", " are you")
+    f = f.replace(" are u ", " are you ") 
+
+    f = f.replace("\\n", " ")
+    f = f.replace("\\t", " ") 
+    f = f.replace("\\fa0", " ") 
+    f = f.replace("\\fc2", " ") 
+
+    f = re.sub('!!+', ' !! ', f)
+    f = re.sub('\?\?+', ' ?? ', f)
+    f = re.sub('\?!+', ' ?! ', f)
+    f = re.sub('\.\.+', '..', f)
+
+    f = re.sub("[*$%&#@()]", " ", f) 
+    f = re.sub("[0-9]+", " 0 ", f)
+
+    f = re.sub(r'([' + py_string.printable + r'])\1{3,}', r'\1\1', f).strip()
+    return f.strip()
+    ##########################################
+
 def remove_punctuation(string):
     # as Keras filters does
     string = string.replace('\t', '')
@@ -566,6 +613,78 @@ def main():
             with open('preptrain', 'wt') as fout:
                 for line in (train_context + train_response):
                     fout.write("\n" + line)
+
+            # Format as a new dataset
+            df_train = \
+                pd.DataFrame().from_dict({"Context": train_context, "Utterance": train_response, "Label": train_labels})
+            valid_context_formatted = []
+            valid_response_formatted = []
+            index = 0
+            while True:
+                response_row = []
+                # grab context
+                valid_context_formatted.append(valid_context[index])
+                response_row.append(valid_response[index])  # true response
+                for j in range(1, 10):
+                    response_row.append(valid_response[index + j])  # other responses
+                valid_response_formatted.append(response_row)
+                index += 10
+
+                if index >= len(valid_context):
+                    break
+
+            valid_response_formatted = np.asarray(valid_response_formatted)
+            df_valid = pd.DataFrame().from_dict({"Context": valid_context_formatted,
+                                                 "Ground Truth Utterance": valid_response_formatted[:, 0],
+                                                 "Distractor_0": valid_response_formatted[:, 1],
+                                                 "Distractor_1": valid_response_formatted[:, 2],
+                                                 "Distractor_2": valid_response_formatted[:, 3],
+                                                 "Distractor_3": valid_response_formatted[:, 4],
+                                                 "Distractor_4": valid_response_formatted[:, 5],
+                                                 "Distractor_5": valid_response_formatted[:, 6],
+                                                 "Distractor_6": valid_response_formatted[:, 7],
+                                                 "Distractor_7": valid_response_formatted[:, 8],
+                                                 "Distractor_8": valid_response_formatted[:, 9],
+                                                 })
+
+            test_context_formatted = []
+            test_response_formatted = []
+            index = 0
+            while True:
+                response_row = []
+                # grab context
+                test_context_formatted.append(test_context[index])
+                response_row.append(test_response[index])  # true response
+                for j in range(1, 10):
+                    response_row.append(test_response[index + j])  # other responses
+                test_response_formatted.append(response_row)
+                index += 10
+
+                if index >= len(test_context):
+                    break
+
+            test_response_formatted = np.asarray(test_response_formatted)
+            df_test = pd.DataFrame().from_dict({"Context": test_context_formatted,
+                                                 "Ground Truth Utterance": test_response_formatted[:, 0],
+                                                 "Distractor_0": test_response_formatted[:, 1],
+                                                 "Distractor_1": test_response_formatted[:, 2],
+                                                 "Distractor_2": test_response_formatted[:, 3],
+                                                 "Distractor_3": test_response_formatted[:, 4],
+                                                 "Distractor_4": test_response_formatted[:, 5],
+                                                 "Distractor_5": test_response_formatted[:, 6],
+                                                 "Distractor_6": test_response_formatted[:, 7],
+                                                 "Distractor_7": test_response_formatted[:, 8],
+                                                 "Distractor_8": test_response_formatted[:, 9],
+                                                 })
+
+            df_train = df_train.applymap(lambda x: x.replace("_eot_", "__eot__") if type(x) != int else x)
+            df_valid = df_valid.applymap(lambda x: x.replace("_eot_", "__eot__"))
+            df_test = df_test.applymap(lambda x: x.replace("_eot_", "__eot__"))
+
+            df_train.to_csv("df_preptrain_v2.csv", index=False)
+            df_valid.to_csv("df_prepvalid_v2.csv", index=False)
+            df_test.to_csv("df_preptest_v2.csv", index=False)
+
             #
             # with open('prepvalid', 'wt') as fout:
             #     for line in (valid_context + valid_response):
@@ -576,28 +695,72 @@ def main():
             #         fout.write("\n" + line)
 
     elif args.version == 3:
-        # TODO: outdated!
-        # because we don't have test data for DSTC7 Ubuntu Corpus v3 yet!
-        # train_context, train_response, train_labels = \
-        #     build_multiturn_data("../ubuntu_data_v3/ubuntu_train_subtask_1.json", args.version, "train", args.sampling)
-        # valid_context, valid_response, valid_labels =\
-        #     build_multiturn_data("../ubuntu_data_v3/ubuntu_dev_subtask_1.json", args.version, "valid", args.sampling)
+        if args.dumped == 'yes':
+            # load existing pickled versions
+            with open('../v3_joblib/prep_train_context.pickle', 'rb') as handle:
+                train_context = pickle.load(handle)
+            with open('../v3_joblib/prep_train_response.pickle', 'rb') as handle:
+                train_response = pickle.load(handle)
+            with open('../v3_joblib/prep_train_labels.pickle', 'rb') as handle:
+                train_labels = pickle.load(handle)
 
-        # or load existing pickled versions!!!
-        with open('../v3_joblib/prep_train_context.pickle', 'rb') as handle:
-            train_context = pickle.load(handle)
-        with open('../v3_joblib/prep_train_response.pickle', 'rb') as handle:
-            train_response = pickle.load(handle)
-        with open('../v3_joblib/prep_valid_context.pickle', 'rb') as handle:
-            valid_context = pickle.load(handle)
-        with open('../v3_joblib/prep_valid_response.pickle', 'rb') as handle:
-            valid_response = pickle.load(handle)
-        # TODO: labels ????
+            with open('../v3_joblib/prep_valid_context.pickle', 'rb') as handle:
+                valid_context = pickle.load(handle)
+            with open('../v3_joblib/prep_valid_response.pickle', 'rb') as handle:
+                valid_response = pickle.load(handle)
+            with open('../v3_joblib/prep_valid_labels.pickle', 'rb') as handle:
+                valid_labels = pickle.load(handle)
+
+            with open('../v3_joblib/prep_test_context.pickle', 'rb') as handle:
+                test_context = pickle.load(handle)
+            with open('../v3_joblib/prep_test_response.pickle', 'rb') as handle:
+                test_response = pickle.load(handle)
+            with open('../v3_joblib/prep_test_labels.pickle', 'rb') as handle:
+                test_labels = pickle.load(handle)
+
+        else:
+            # because we don't have test data for DSTC7 Ubuntu Corpus v3 yet!
+            train_context, train_response, train_labels = \
+                build_multiturn_data("../ubuntu_data_v3/ubuntu_train_subtask_1.json", args.version, "train", args.sampling)
+            valid_context, valid_response, valid_labels =\
+                build_multiturn_data("../ubuntu_data_v3/ubuntu_dev_subtask_1.json", args.version, "valid", args.sampling)
+            test_context, test_response, test_labels = \
+                build_multiturn_data("../ubuntu_data_v3/ubuntu_test_subtask_1.json", args.version, "test", args.sampling)
+
+
+            with open('../v3_joblib/prep_train_context.pickle', 'wb') as handle:
+                pickle.dump(train_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v3_joblib/prep_train_response.pickle', 'wb') as handle:
+                pickle.dump(train_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v3_joblib/prep_train_labels.pickle', 'wb') as handle:
+                pickle.dump(train_labels, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+            with open('../v3_joblib/prep_valid_context.pickle', 'wb') as handle:
+                pickle.dump(valid_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v3_joblib/prep_valid_response.pickle', 'wb') as handle:
+                pickle.dump(valid_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v3_joblib/prep_valid_labels.pickle', 'wb') as handle:
+                pickle.dump(valid_labels, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+            with open('../v3_joblib/prep_test_context.pickle', 'wb') as handle:
+                pickle.dump(test_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v3_joblib/prep_test_response.pickle', 'wb') as handle:
+                pickle.dump(test_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open('../v3_joblib/prep_test_labels.pickle', 'wb') as handle:      # actually all labels are "0"
+                pickle.dump(test_labels, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+            # Debug
+            with open('preptrain_v3', 'wt') as fout:
+                i = 0
+                for line in train_context:
+                    if i % 2 == 0:
+                        fout.write("\n" + line)
+                    i += 1
+                for line in train_response:
+                    fout.write("\n" + line)
 
     global word_index
-    global stop_words
     tokenizer = None
-    # tokenize
     print('tokenize')
     if args.version == 1:
         if args.dumped == 'yes':
@@ -614,7 +777,6 @@ def main():
                 pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     elif args.version == 2:
-        # TODO: tokenize for v2 and save tokenizer
         if args.dumped == 'yes':
             with open('../v2_joblib/v2_tokenizer.pickle', 'rb') as handle:
                 tokenizer = pickle.load(handle)
@@ -626,25 +788,16 @@ def main():
                 pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     elif args.version == 3:
-        # TODO: outdated!
-        with open('../v3_joblib/prep_train_context.pickle', 'wb') as handle:
-            pickle.dump(train_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open('../v3_joblib/prep_train_response.pickle', 'wb') as handle:
-            pickle.dump(train_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open('../v3_joblib/prep_valid_context.pickle', 'wb') as handle:
-            pickle.dump(valid_context, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        with open('../v3_joblib/prep_valid_response.pickle', 'wb') as handle:
-            pickle.dump(valid_response, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        # tokenizer = Tokenizer(filters="\t\n,", split=" ")
-        # tokenizer.fit_on_texts(train_context + train_response)
-        # save tokenizer
-        # with open('../v3_joblib/v3_tokenizer.pickle', 'wb') as handle:
-        #     pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        with open('../v3_joblib/v3_tokenizer.pickle', 'rb') as handle:
-            print('restoring tokenizer for v3')
-            tokenizer = pickle.load(handle)
+        if args.dumped == 'yes':
+            with open('../v3_joblib/v3_tokenizer.pickle', 'rb') as handle:
+                print('restoring tokenizer for v3')
+                tokenizer = pickle.load(handle)
+        else:
+            tokenizer = Tokenizer(filters=filters, split=" ")
+            tokenizer.fit_on_texts(train_context + train_response)
+            # save tokenizer
+            with open('../v3_joblib/v3_tokenizer.pickle', 'wb') as handle:
+                pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     # fix bug with num_words... Keras sucks again
     all_words_count = len(tokenizer.word_index)
@@ -659,7 +812,6 @@ def main():
 
     # Create embeddigns
     embedding_matrix = None
-    stop_words = None
     if args.embeddings == 'word2vec':   # our trained word2vec
         # set the embedding file
         w2v_path = ""
@@ -669,7 +821,8 @@ def main():
             w2v_path = args.w2v_path
             # w2v_path = '../v2_ubuntu_word2vec_200_min_count1_iter10_window_15_sg_1.model'  # TODO: replace word2vec model here
         elif args.version == 3:
-            w2v_path = '../v3_ubuntu_word2vec_200.model'
+            w2v_path = args.w2v_path
+            # w2v_path = '../v3_ubuntu_word2vec_200.model'
 
         # create embedding matrix
         print('create embedding matrix')
@@ -720,8 +873,7 @@ def main():
     train_response, train_response_len, word_train_response = preprocess_texts(train_response)
     valid_context, valid_context_len, word_valid_context = preprocess_multi_turn_texts(valid_context, args.max_turn)
     valid_response, valid_response_len, word_valid_response = preprocess_texts(valid_response)
-    if args.version in [1, 2]:
-        # because we don't have test data yet!
+    if args.version in [1, 2, 3]:
         test_context, test_context_len, word_test_context = preprocess_multi_turn_texts(test_context, args.max_turn)
         test_response, test_response_len, word_test_response = preprocess_texts(test_response)
 
@@ -739,7 +891,7 @@ def main():
                   'response_len': valid_response_len,
                   'labels': valid_labels}
     # In DSTC7 (v3) we don't have test set
-    if args.version in [1, 2]:
+    if args.version in [1, 2, 3]:
         # because we don't have test data yet!
         test_data_context = {'context': test_context,
                      'context_len': test_context_len}

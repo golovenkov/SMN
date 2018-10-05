@@ -22,10 +22,10 @@ v2_joblib/
 v3_joblib/
 tokenizer.pickle
 ubuntu_data.mul.200d.fullw2v.train
-tf/preptrain
-tf/prepvalid
-tf/preptest
+tf/prep*
 indexes*
 tf/DAM_Graph
 tf/model_checkpoints_DAM
 tf/v2_tokenizer.pickle
+tf/df_prep*
+tf/max_vectors

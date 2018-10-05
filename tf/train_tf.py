@@ -3,6 +3,8 @@ import numpy as np
 
 np.random.seed(42)
 
+import ijson
+import json
 import joblib
 import tensorflow as tf
 
@@ -1188,7 +1190,7 @@ class DeepAttentionMatchingNetwork():
         self.test_data_response_len = test_data_response_len
 
         self.train_labels = train_labels
-        self.validation_step = len(self.train_data_context)
+        self.validation_step = len(self.train_data_context) // 2
 
         self.trainable = trainable
         self.stack_num = L
@@ -1215,7 +1217,7 @@ class DeepAttentionMatchingNetwork():
                                                                           word_embedding_size), dtype=tf.float32, trainable=self.trainable)
             self.embedding_init = word_embeddings.assign(self.embedding_ph)
         with tf.variable_scope('embedding_lookup'):
-            all_utterance_embeddings = tf.nn.embedding_lookup(word_embeddings, self.utterance_ph)
+            # all_utterance_embeddings = tf.nn.embedding_lookup(word_embeddings, self.utterance_ph)  # unused
             response_embeddings = tf.nn.embedding_lookup(word_embeddings, self.response_ph)
         # with tf.variable_scope('context_unstack'):
         #     all_utterance_embeddings = tf.unstack(all_utterance_embeddings, num=self.max_num_utterance, axis=1)
@@ -1315,7 +1317,7 @@ class DeepAttentionMatchingNetwork():
 
         # loss and train
         with tf.variable_scope('loss'):
-            self.total_loss, self.logits = layers.loss(final_info, self.y_true, clip_value=1e15)
+            self.total_loss, self.logits = layers.loss(final_info, self.y_true, clip_value=1e10)
             self.y_pred = tf.nn.softmax(self.logits, name="y_pred")
             tf.summary.scalar('loss', self.total_loss)
 
@@ -1325,7 +1327,7 @@ class DeepAttentionMatchingNetwork():
             self.learning_rate = tf.train.exponential_decay(
                 initial_learning_rate,
                 global_step=self.global_step,
-                decay_steps=400,
+                decay_steps=600,
                 decay_rate=0.9,
                 staircase=True)
             # values = [1e-3, 1e-4, 1e-5]
@@ -1348,7 +1350,7 @@ class DeepAttentionMatchingNetwork():
                 if grad is None:
                     print(var)
 
-            self.capped_gvs = [(tf.clip_by_value(grad, -1e15, 1e15), var) for grad, var in self.grads_and_vars]
+            self.capped_gvs = [(tf.clip_by_value(grad, -1e10, 1e10), var) for grad, var in self.grads_and_vars]
             self.train_op = Optimizer.apply_gradients(
                 self.capped_gvs,
                 global_step=self.global_step)
@@ -1425,17 +1427,30 @@ class DeepAttentionMatchingNetwork():
                 if low % self.validation_step == 0:
                     print("Validation:")
                     if self.version == 1:
-                        self.evaluate_from_n_utterances(sess)
+                        _ = self.evaluate_from_n_utterances(sess)
                         print("Test:")
-                        self.test(sess)
+                        _ = self.test(sess)
                     elif self.version == 2:
-                        self.evaluate_from_n_utterances(sess)
+                        _ = self.evaluate_from_n_utterances(sess)
                         print('Test:')
-                        self.test(sess)
+                        _ = self.test(sess)
                     elif self.version == 3:
-                        # only evaluate for v3 because we don't have test data yet!
-                        self.evaluate_from_n_utterances(sess, n_utt=100, indices=indices_100)
+                        valid_vectors = self.evaluate_from_n_utterances(sess, n_utt=100, indices=indices_100)
                         self.evaluate_from_n_utterances(sess, n_utt=10, indices=indices_10)
+                        print("Computing test vectors")
+                        test_vectors = self.test(sess)
+                        # Save valid and test vectors
+                        np.savetxt(fname="vectors/valid_vectors_{}_{}.txt".format(
+                            epoch, low), X=valid_vectors, fmt='%1.3f')
+                        np.savetxt(fname="vectors/test_vectors_{}_{}.txt".format(
+                            epoch, low), X=test_vectors, fmt='%1.3f')
+
+                        self.format_vectors("../ubuntu_data_v3/ubuntu_dev_subtask_1.json",
+                                            "vectors/valid_submission_{}_{}.json".format(epoch, low),
+                                            valid_vectors)
+                        self.format_vectors("../ubuntu_data_v3/ubuntu_test_subtask_1.json",
+                                            "vectors/test_submission_{}_{}.json".format(epoch, low),
+                                            test_vectors)
 
                 if low >= history.shape[0]:
                     low = 0
@@ -1451,7 +1466,44 @@ class DeepAttentionMatchingNetwork():
     def get_dims_and_recall(self, length, k=10):
         return length//k, k, [1, 2, 5] if k == 10 else [1, 2, 5, 10, 50]
 
+    def format_vectors(self, source_filename, target_filename, vectors):
+        """
+        Function for formatting probabilities for DSTC7 test data
+        :param vectors: numpy array with vectors for all test samples
+        :return: None
+        """
+        results = []
+        with open(source_filename, 'rb') as f:
+            index = 0
+
+            json_data = ijson.items(f, 'item')
+            for entry in json_data:
+
+                dialog = entry
+                example_dict = {"example-id": dialog['example-id']}
+                responses_list = []
+                for i, utterance in enumerate(dialog['options-for-next']):
+                    responses_list.append(
+                        {
+                            "candidate-id": utterance['candidate-id'],
+                            "confidence": float("{:.3f}".format(vectors[index]))
+                        }
+                    )
+                    index += 1
+                example_dict['candidate-ranking'] = responses_list
+                results.append(example_dict)
+
+        # Save results
+        json.dump(results, open(target_filename, "wt"), indent=4)
+
     def evaluate_from_n_utterances(self, sess, n_utt=10, indices=None):
+        """
+        Evaluate using validation dataset, returns probabilities for each sample
+        :param sess: Tensorflow session
+        :param n_utt: number of candidate responses
+        :param indices: indices array for persisting of shuffling between epochs
+        :return: ndarray of probabilities for each sample with shape [num_of_samples, ]
+        """
         self.all_candidate_scores = []
         history, history_len = self.valid_data_context, self.valid_data_context_len
         response, response_len = self.valid_data_response, self.valid_data_response_len
@@ -1483,6 +1535,8 @@ class DeepAttentionMatchingNetwork():
         for n in recalls:
             print('Recall @ ({}, {}): {:g}'.format(n, dim2, self.evaluate_recall(y, n)))
 
+        return all_candidate_scores
+
     def test(self, sess):
         self.all_candidate_scores = []
         history, history_len = self.test_data_context, self.test_data_context_len
@@ -1505,12 +1559,14 @@ class DeepAttentionMatchingNetwork():
         if self.version in [1, 2]:
             dim1, dim2, recalls = self.get_dims_and_recall(len(history))
         elif self.version == 3:
-            pass  # no test data for DSTC7 yet!
+            dim1, dim2, recalls = self.get_dims_and_recall(len(history), k=100)
 
         y = np.array(all_candidate_scores).reshape(dim1, dim2)
         y = [np.argsort(y[i], axis=0)[::-1] for i in range(len(y))]
         for n in recalls:
             print('Recall @ ({}, {}): {:g}'.format(n, dim2, self.evaluate_recall(y, n)))
+
+        return all_candidate_scores
 
     def evaluate_recall(self, y, k=1):
         num_examples = float(len(y))
